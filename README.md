@@ -32,6 +32,6 @@ This code was developed using R.
 Ania Zylbersztejn - [github](https://github.com/AniaZylb) [twitter](https://twitter.com/zylberek)
 
 ## Acknowledgments:
-Matthew Jay -   [twitter](https://twitter.com/mattjayresearch)
+Matthew Jay -   [twitter](https://twitter.com/mattjaylats)
 
 
