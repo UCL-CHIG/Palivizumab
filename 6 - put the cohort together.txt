@@ -1,0 +1,453 @@
+#*****************************************************************************#
+#
+#		Project name: palivizumab study			    	#
+#		Author: Ania Zylbersztejn (with help from Matthew Jay)	#
+# 		R script name: link in everything
+#                              to have a master file for analyses
+#
+#*****************************************************************************#
+
+# load HES hospital admission records for children 
+# with at least one ICD-10 or OPCS code for eligible condition
+# cleaned in R script (1)
+
+
+
+
+#****************************************************************************************************
+#                		       Housekeeping
+#****************************************************************************************************
+
+### set working directory
+setwd('X:\\')
+
+### install / load data.table library 
+library(data.table)
+
+
+######## load relevant data:
+
+### cohort of eligible children from R scripts (2)  
+load("elig.cohort2020")
+
+#### load most likely hospital of care from R script (4), including indicator of death in hospital
+load("elig.hosp")
+elig.hosp.tmp <- copy(elig.hosp)
+
+elig.cohort2020 <- merge(elig.hosp, elig.cohort2020, allx=F, all.y=T, by="encrypted_hesid")
+names(elig.cohort2020)
+
+#### load pali prescribing per child per RSV season from R script (5)
+load("data April 2019\\palivizumab\\pali summarised clean ALL DATA.rdata")
+
+#### load all births from R script (0)
+load(all.births.summary)
+
+#### additionally need to load an indicator 
+#### derived from HTI data equal to one if at least one linked dispensing record is available
+#### for all children from elig.cohort2020
+
+# keep only pali prescriptions that linked to a birth:
+pali.summary <- merge(pali.summary, all.births.summary[, "encrypted_hesid"], all.x=F, all.y=F, by="encrypted_hesid")
+rm(all.births.summary)
+pali.summary$pali <- 1
+
+
+#### generate month of birth
+elig.cohort2020[, birth.month:=month(bday)]
+table(elig.cohort2020$birth.month, exclude = NULL)
+
+
+##### derive RSV season and age at start of RSV season
+elig.cohort2020$season <- NULL
+elig.cohort2020[ , season := year(bday)]
+elig.cohort2020$tmp <- as.Date(paste(elig.cohort2020$season, "10", "01", sep="-"), format="%Y-%m-%d")
+
+##### merge in pali
+names(pali.summary)
+elig.cohort2020 <- merge( elig.cohort2020, pali.summary, all.x=T, all.y=F, by=c("encrypted_hesid", "season"))
+table(elig.cohort2020$pali, exclude = NULL)
+elig.cohort2020[is.na(pali)]$pali <-0
+pali.summary[, seas.nr := seq_len(.N), by=c("encrypted_hesid")]
+table(pali.summary$seas.nr)
+
+
+elig.cohort2020[, age := (tmp-bday), ]
+hist(as.numeric(elig.cohort2020$age))
+table(elig.cohort2020[as.numeric(elig.cohort2020$age<0)]$birth.month)    
+elig.cohort2020[, age := ifelse(age<0, 0, age), ]
+hist(elig.cohort2020$age)   
+summary(elig.cohort2020$age)
+
+hist(elig.cohort2020[birth.month=="1"]$age)
+
+elig.cohort2020$age.cat <- NULL
+elig.cohort2020$age.cat <- factor(elig.cohort2020$age.cat, levels(elig.cohort2020$age.cat)["in season" ,"<1.5", "1.5-3", "3-6", "6-9"])
+
+elig.cohort2020[age==0]$age.cat <- "in season"
+elig.cohort2020[age< (30.4*1.5) & !is.na(age) & age!=0]$age.cat <- "<1.5"
+elig.cohort2020[age>=(30.4*1.5) & age<(30.4*3) & !is.na(age)]$age.cat <- "1.5-3"
+elig.cohort2020[age>=(30.4*3) & age<(30.4*6) & !is.na(age)]$age.cat <- "3-6"
+elig.cohort2020[age>=(30.4*6) & age<275 & !is.na(age)]$age.cat <- "6-9"
+table(elig.cohort2020$age.cat ,exclude = NULL)
+table(elig.cohort2020$age.cat , elig.cohort2020$birth.month, exclude = NULL)
+
+
+
+
+#*****************************************************************************
+#                	derive likely eligibility according to age
+#*****************************************************************************
+
+# likely eligible if BPD & <9 months at start of season
+table(elig.cohort2020$bpd.age, elig.cohort2020$age.cat, exclude = NULL)
+table(elig.cohort2020[bpd.age==7007]$age.cat, elig.cohort2020[bpd.age==7007]$pali, exclude = NULL)
+elig.cohort2020[bpd.age==7007, bron.dys:=0]
+elig.cohort2020[bron.dys==0]$bpd.age <- NA
+table(elig.cohort2020$bron.dys, elig.cohort2020$pali, exclude = NULL)
+
+# if <6 months and CHD
+# or if have comorbidities and CHD
+elig.cohort2020[ , nr.cc.cond := cong.anom+ cc.other+ neurological+ muscular+ metabolic+ chron.inf+ cancer]
+table(elig.cohort2020$nr.cc.cond, exclude = NULL)
+table(elig.cohort2020$nr.cc.cond, elig.cohort2020$chd, exclude = NULL )
+options( scipen = 999, digits=3)
+cbind( prop.table(table(elig.cohort2020[chd==1]$nr.cc.cond, elig.cohort2020[chd==1]$pali, exclude = NULL ), 1),
+       table(elig.cohort2020[chd==1]$nr.cc.cond, elig.cohort2020[chd==1]$pali, exclude = NULL ) )
+prop.table( table(elig.cohort2020[chd==1 & age<180]$pali, exclude = NULL )) 
+prop.table( table(elig.cohort2020[chd==1 & neurological==1]$pali, exclude = NULL )) 
+table(elig.cohort2020[chd==1]$nr.cc.cond, elig.cohort2020[chd==1]$neurological, exclude = NULL )
+
+
+table(elig.cohort2020$startage.chd, elig.cohort2020$age.cat, exclude = NULL)
+elig.cohort2020[, chd.under6m := ifelse(startage.chd<7006, 1, 0) ]
+elig.cohort2020[is.na(chd.under6m)]$chd.under6m <- 0
+table(elig.cohort2020$chd.under6m, elig.cohort2020$age.cat, exclude = NULL)
+elig.cohort2020[, chd.under6m:= ifelse(age>(30.4*6), 0, chd.under6m)]  
+table(elig.cohort2020$chd.under6m, exclude=NULL)
+table(elig.cohort2020$chd.under6m, elig.cohort2020$age.cat, exclude=NULL)
+table(elig.cohort2020$chd.under6m, elig.cohort2020$pali, exclude=NULL)
+
+# sensitivity if have 2 or more CC's
+elig.cohort2020[, chd.othercc := ifelse(chd==1 & nr.cc.cond>2, 1, 0) ]
+elig.cohort2020[is.na(chd.othercc)]$chd.othercc <- 0
+table(elig.cohort2020$chd.othercc, exclude=NULL)
+table(elig.cohort2020$chd.othercc, elig.cohort2020$pali, exclude=NULL)
+
+### neurological
+elig.cohort2020[, chd.neuro := ifelse(chd==1 & neurological==1, 1, 0) ]
+elig.cohort2020[is.na(chd.neuro)]$chd.neuro <- 0
+table(elig.cohort2020$chd.neuro, exclude=NULL)
+table(elig.cohort2020$chd.neuro, elig.cohort2020$pali, exclude=NULL)
+
+
+####### immunosup
+elig.cohort2020[, scid := ifelse(first.adm<tmp & immun.sup.date>tmp, 1, 0)]
+elig.cohort2020[is.na(scid)]$scid <- 0
+table(elig.cohort2020$scid, exclude=NULL)
+table(elig.cohort2020$scid, elig.cohort2020$pali, exclude=NULL)
+
+####### other CLD
+elig.cohort2020[, other.cld := ifelse(season==season.cld.1 | season==season.cld.2, 1, 0)]
+elig.cohort2020[is.na(other.cld)]$other.cld <- 0
+elig.cohort2020[, other.cld:=as.numeric(other.cld)]
+table(elig.cohort2020$other.cld, exclude=NULL)
+table(elig.cohort2020$other.cld, elig.cohort2020$pali, exclude=NULL)
+
+elig.cohort2020 <- elig.cohort2020[other.cld==1 | scid==1 | chd.under6m==1 | chd.othercc==1 | chd.neuro==1 | bron.dys==1]
+
+save(elig.cohort2020, file="XXXX")
+
+
+
+####### extra eligibility criteria:
+table(elig.cohort2020$age.cat, exclude = NULL)
+
+elig.cohort2020$chd.elig <- NULL
+elig.cohort2020[ (age.cat=="<1.5" | age.cat=="in season" ) & chd.under6m==1 , chd.elig := ifelse( gestat.compl<32 & !is.na(gestat.compl)  , 1,
+                                                                                                  ifelse(is.na(gestat.compl), 9, 0 ))]
+elig.cohort2020[ age.cat=="1.5-3" & chd.under6m==1 , chd.elig := ifelse( gestat.compl<30 & !is.na(gestat.compl) , 1, 
+                                                                         ifelse(is.na(gestat.compl), 9, 0 ))]
+elig.cohort2020[ age.cat=="3-6" & chd.under6m==1 , chd.elig := ifelse( gestat.compl<26 & !is.na(gestat.compl), 1, 
+                                                                       ifelse(is.na(gestat.compl), 9, 0 ))]
+elig.cohort2020[is.na(chd.elig)]$chd.elig<-0
+table(elig.cohort2020$age.cat, elig.cohort2020$chd.elig, exclude = NULL)
+table(elig.cohort2020$chd.under6m, elig.cohort2020$chd.elig, exclude = NULL)
+table(elig.cohort2020$gestat.compl, elig.cohort2020$chd.elig, exclude = NULL)
+
+
+elig.cohort2020$bpd.elig<- NULL
+elig.cohort2020[ age.cat=="in season" & bron.dys==1 , bpd.elig := ifelse( gestat.compl<34 & !is.na(gestat.compl), 1,
+                                                                          ifelse(is.na(gestat.compl), 9, 0 ))]
+elig.cohort2020[ age.cat=="<1.5" & bron.dys==1 , bpd.elig := ifelse( gestat.compl<34 & !is.na(gestat.compl), 1,
+                                                                     ifelse(is.na(gestat.compl), 9, 0 ))]
+elig.cohort2020[ age.cat=="1.5-3" & bron.dys==1, bpd.elig := ifelse( gestat.compl<32 & !is.na(gestat.compl), 1,
+                                                                     ifelse(is.na(gestat.compl), 9, 0 ))]
+elig.cohort2020[ age.cat=="3-6" & bron.dys==1 , bpd.elig := ifelse( gestat.compl<28 & !is.na(gestat.compl), 1,
+                                                                    ifelse(is.na(gestat.compl), 9, 0 ))]
+elig.cohort2020[ age.cat=="6-9" & bron.dys==1 , bpd.elig := ifelse( gestat.compl<24 & !is.na(gestat.compl), 1,
+                                                                    ifelse(is.na(gestat.compl), 9, 0 ))]
+elig.cohort2020[is.na(bpd.elig)]$bpd.elig<-0
+table(elig.cohort2020$bron.dys, elig.cohort2020$bpd.elig, exclude = NULL)
+table(elig.cohort2020$age.cat, elig.cohort2020$bpd.elig, exclude = NULL)
+
+
+save(elig.cohort2020, file="XXX")
+
+
+
+
+#*****************************************************************************
+#                	add extra variables
+#*****************************************************************************
+
+# load all births
+all.births.summary <- merge(elig.cohort2020[, c("encrypted_hesid")], all.births.summary, all.x=F, all.y=F, by="encrypted_hesid")
+
+elig.cohort2020 <- merge(elig.cohort2020, all.births.summary[, c("encrypted_hesid", "matage")], all.x=F, all.y=F, by="encrypted_hesid")
+
+
+#~~~~~~~~~~~~~~~~~~~~~ check the data, derive extra variables ~~~~~~~~~~~~~~~~~#
+
+### birth weight
+summary(elig.cohort2020$birweit.compl)
+elig.cohort2020$birweit.cat <- NULL
+elig.cohort2020$birweit.cat <- factor(elig.cohort2020$birweit.cat, levels(elig.cohort2020$birweit.cat)["<1000", "1000-1499","1500-1999", "2000+"])
+elig.cohort2020[birweit.compl<1000 & !is.na(birweit.compl)]$birweit.cat <- "<1000"
+elig.cohort2020[birweit.compl<1500 & birweit.compl>=1000 & !is.na(birweit.compl)]$birweit.cat <- "1000-1499"
+elig.cohort2020[birweit.compl<2000 & birweit.compl>=1500 & !is.na(birweit.compl)]$birweit.cat <- "1500-1999"
+elig.cohort2020[birweit.compl>=2000 & !is.na(birweit.compl)]$birweit.cat <- "2000+"
+
+table(elig.cohort2020$birweit.cat, elig.cohort2020$pali, exclude = NULL)
+table(elig.cohort2020$birweit.cat, exclude = NULL)
+summary(elig.cohort2020$birweit.compl)
+
+
+### gestational age
+elig.cohort2020$gestat.cat <- NULL
+elig.cohort2020$gestat.cat <- factor(elig.cohort2020$gestat.cat, levels(elig.cohort2020$gestat.cat)["<24", "24-25", "26-27",
+                                                                                                    "28-29", "30-31", "32+"])
+elig.cohort2020[gestat.compl<24 & !is.na(gestat.compl)]$gestat.cat <- "<24"
+elig.cohort2020[gestat.compl>=24 & gestat.compl<=25 & !is.na(gestat.compl)]$gestat.cat <- "24-25"
+elig.cohort2020[gestat.compl>=26 & gestat.compl<=27 & !is.na(gestat.compl)]$gestat.cat <- "26-27"
+elig.cohort2020[gestat.compl>=28 & gestat.compl<=29 & !is.na(gestat.compl)]$gestat.cat <- "28-29"
+elig.cohort2020[gestat.compl>=30 & gestat.compl<=31 & !is.na(gestat.compl)]$gestat.cat <- "30-31"
+elig.cohort2020[gestat.compl>=32 & !is.na(gestat.compl)]$gestat.cat <- "32+"
+table(elig.cohort2020$gestat.cat, elig.cohort2020$pali, exclude = NULL)
+table(elig.cohort2020$gestat.compl, elig.cohort2020$gestat.cat, exclude = NULL)
+table(elig.cohort2020$gestat.cat,  exclude = NULL)
+summary(elig.cohort2020$gestat.compl)
+
+
+#### maternal age
+elig.cohort2020$matcat <- NULL
+elig.cohort2020$matcat <- factor(elig.cohort2020$matcat, levels(elig.cohort2020$matcat)["<25", "25-29", "30-34",
+                                                                                                          "35+"])
+elig.cohort2020[matage<25 & !is.na(matage)]$matcat <- "<25"
+elig.cohort2020[matage>=25 & matage<30 & !is.na(matage)]$matcat <- "25-29"
+elig.cohort2020[matage>=30 & matage<35 & !is.na(matage)]$matcat <- "30-34"
+elig.cohort2020[matage>=35 & !is.na(matage)]$matcat <- "35+"
+table(elig.cohort2020$matcat, elig.cohort2020$pali, exclude = NULL)
+summary(elig.cohort2020$matage)
+
+
+elig.cohort2020$sex <- factor(elig.cohort2020$sex, labels = c("male", "female"))
+table(elig.cohort2020$sex)
+
+elig.cohort2020[, birth.month := factor(birth.month)]
+elig.cohort2020[, season := factor(season)]
+elig.cohort2020$sex <- relevel(elig.cohort2020$sex, ref = "female")
+elig.cohort2020[, birweit.cat := factor(birweit.cat)]
+elig.cohort2020[, gestat.cat := factor(gestat.cat)]
+elig.cohort2020[, matcat := factor(matcat)]
+elig.cohort2020[, ethnos.cat := factor(ethnos.cat)]
+elig.cohort2020[, imd04quint := factor(imd04quint)]
+
+elig.cohort2020$season.start <- as.Date(paste(elig.cohort2020$season, "10", "01", sep="-"), format="%Y-%m-%d")
+elig.cohort2020[, age.week := floor(as.numeric(season.start-bday)/7) , ]
+
+###### all luing related condiotions
+elig.cohort2020[, lung := ifelse(bpd.elig==1 | other.cld==1, 1, 0)]
+elig.cohort2020[, lung2 := ifelse(bron.dys==1 | other.cld==1, 1, 0)]
+
+######## all heart related conditions
+elig.cohort2020[, heart := ifelse(chd.elig==1 | chd.neuro==1, 1, 0)]
+# elig.cohort2020[, heart2 := ifelse(chd.under6m==1 | chd.neuro==1, 1, 0)]
+elig.cohort2020[, heart2 := ifelse(chd.under6m==1 , 1, 0)]
+
+###### overall complexity
+elig.cohort2020[, complexity := heart + lung +scid]
+table(elig.cohort2020$complexity)
+elig.cohort2020[complexity==3, complexity := 2]
+
+save(elig.cohort2020, file="XXXXX")
+
+
+
+
+
+
+#*****************************************************************************
+#                derive eligibility according to pragmatic criteria
+#*****************************************************************************
+
+### need to set seed as we randomly select a child if multiple birth to drop
+set.seed(10)
+
+load("elig.cohort2020")
+names(elig.cohort2020)
+
+
+###################################################################################
+####  pragmatic criteria
+
+elig.cohort2020[, elig.pragm:= ifelse(other.cld==1 | scid==1 | chd.under6m==1 | chd.neuro==1  | bron.dys==1, 1, 0)]
+
+elig.cohort2020.pragm <- elig.cohort2020[elig.pragm==1]
+
+elig.cohort2020.pragm$elig <- 1
+table(elig.cohort2020.pragm$elig)
+table(elig.cohort2020.pragm[pali==1]$elig)
+
+
+####### alive at start of RSV season
+table(elig.cohort2020.pragm$death.before.season, exclude = NULL)
+elig.cohort2020.pragm<- elig.cohort2020.pragm[death.before.season!=1 | is.na(death.before.season)]
+
+table(elig.cohort2020.pragm$elig)
+table(elig.cohort2020.pragm[pali==1]$elig)
+
+
+######## keep only those with a full hospital record 
+# this needs to be derived from HTI data if at least one linked dispensing record is available
+elig.cohort2020.pragm <- elig.cohort2020.pragm[full.record==1]
+
+table(elig.cohort2020.pragm$elig)
+table(elig.cohort2020.pragm[pali==1]$elig)
+
+
+######### likely under care of reporting hospital
+non.rep <- elig.cohort2020.pragm[hosp.care==99]
+elig.cohort2020.pragm <- elig.cohort2020.pragm[hosp.care!=99]
+
+table(elig.cohort2020.pragm$elig)
+table(elig.cohort2020.pragm[pali==1]$elig)
+
+
+########## likely multiple births - keep one (randomly)
+elig.cohort2020.pragm[ , mult.rec:=seq(.N), by=c("gestat.compl", "hosp.birth", "bday", "mult.bir", "ethnos.mode", "imd04quint" , "hosp.care" )]
+elig.cohort2020.pragm[ , mult.rec:=max(mult.rec), by=c("gestat.compl", "hosp.birth", "bday", "mult.bir", "ethnos.mode", "imd04quint" , "hosp.care" )]
+table(elig.cohort2020.pragm$mult.bir, elig.cohort2020.pragm$mult.rec, exclude = NULL)
+
+elig.cohort2020.pragm[ , mult.rec1:=seq(.N), by=c("hosp.birth", "bday", "mult.bir", "hosp.care" )]
+elig.cohort2020.pragm[ , mult.rec1:=max(mult.rec1), by=c("hosp.birth", "bday", "mult.bir", "hosp.care" )]
+table(elig.cohort2020.pragm$mult.bir, elig.cohort2020.pragm$mult.rec1, exclude = NULL)
+
+elig.cohort2020.pragm[mult.rec>1, tmp.nr := runif(mult.bir)]
+elig.cohort2020.pragm[mult.rec>1, tmp.nr2 := max(tmp.nr) , by=c("gestat.compl", "hosp.birth", "bday", "mult.bir", "ethnos.mode", "imd04quint" , "hosp.care" )]
+elig.cohort2020.pragm[, mult.exc := ifelse(mult.bir==1 & mult.rec>1 & tmp.nr!=tmp.nr2, 1, 0)]
+table(elig.cohort2020.pragm$mult.exc, exclude = NULL)   # replicated ones
+table(elig.cohort2020.pragm[mult.bir==1 & mult.rec>1]$mult.exc, exclude = NULL)
+table(elig.cohort2020.pragm[mult.bir==1 & mult.rec>1]$mult.exc, elig.cohort2020.pragm[mult.bir==1 & mult.rec>1]$pali, exclude = NULL)
+
+mult.tmp <- elig.cohort2020.pragm[mult.exc!=0]
+elig.cohort2020.pragm <- elig.cohort2020.pragm[mult.exc==0]
+table(elig.cohort2020.pragm$elig)
+table(elig.cohort2020.pragm[pali==1]$elig)
+
+### complete gestat and non elig
+table(elig.cohort2020.pragm[eligibility.pragm==0]$elig)
+table(elig.cohort2020.pragm[pali==1 & eligibility.pragm==0]$elig)
+
+### complete gestat and non elig
+table(elig.cohort2020.pragm[eligibility.pragm==9]$elig)
+table(elig.cohort2020.pragm[pali==1 & eligibility.pragm==9]$elig)
+
+### complete gestat and non elig
+table(elig.cohort2020.pragm[eligibility.pragm==1]$elig)
+table(elig.cohort2020.pragm[pali==1 & eligibility.pragm==1]$elig)
+
+
+save(elig.cohort2020.pragm, file="XXX")
+
+
+
+#*************************************************************************************************
+#                derive eligibility according to strict criteria for sensitivity analyses
+#*************************************************************************************************
+
+######################## exclusions - derive the cohort #############
+elig.cohort2020[, elig.strict:= ifelse(other.cld==1 | scid==1 | chd.under6m==1 | bron.dys==1, 1, 0)]
+
+######## still in hospital at the start of RSV season - exclude
+elig.cohort2020[, season := year(season.start)]
+elig.cohort2020$tmp2 <- as.Date(paste(elig.cohort2020$season+1, "03", "01", sep="-"), format="%Y-%m-%d")
+elig.cohort2020[, in.hosp:= ifelse(elig.date>tmp2, 1, 0) ]
+table(elig.cohort2020[elig.strict==1]$pali, elig.cohort2020[elig.strict==1]$in.hosp, exclude=NULL)
+table(elig.cohort2020[elig.strict==1]$birth.month, elig.cohort2020[elig.strict==1]$in.hosp, exclude=NULL)
+elig.cohort2020[, season := factor(season)]
+
+table(elig.cohort2020$elig.strict)
+elig.cohort2020[, elig.strict:= ifelse(in.hosp==1, 0, elig.strict)]
+
+
+###################################################################################
+####  strict criteria
+
+elig.cohort2020.strict <- elig.cohort2020[elig.strict==1]
+
+elig.cohort2020.strict$elig <- 1
+table(elig.cohort2020.strict$elig)
+table(elig.cohort2020.strict[pali==1]$elig)
+
+####### alive at start of RSV season
+table(elig.cohort2020.strict$death.before.season, exclude = NULL)
+elig.cohort2020.strict<- elig.cohort2020.strict[death.before.season!=1 | is.na(death.before.season)]
+
+table(elig.cohort2020.strict$elig)
+table(elig.cohort2020.strict[pali==1]$elig)
+
+
+######## keep only those with a full hospital record
+elig.cohort2020.strict <- elig.cohort2020.strict[full.record==1]
+
+table(elig.cohort2020.strict$elig)
+table(elig.cohort2020.strict[pali==1]$elig)
+
+
+######### likely under care of reporting hospital
+non.rep <- elig.cohort2020.strict[hosp.care==99]
+elig.cohort2020.strict <- elig.cohort2020.strict[hosp.care!=99]
+
+table(elig.cohort2020.strict$elig)
+table(elig.cohort2020.strict[pali==1]$elig)
+
+
+########## likely multiple births
+elig.cohort2020.strict[ , mult.rec:=seq(.N), by=c("gestat.compl", "hosp.birth", "bday", "mult.bir", "ethnos.mode", "imd04quint" , "hosp.care" )]
+elig.cohort2020.strict[ , mult.rec:=max(mult.rec), by=c("gestat.compl", "hosp.birth", "bday", "mult.bir", "ethnos.mode", "imd04quint" , "hosp.care" )]
+table(elig.cohort2020.strict$mult.bir, elig.cohort2020.strict$mult.rec, exclude = NULL)
+
+elig.cohort2020.strict[ , mult.rec1:=seq(.N), by=c("hosp.birth", "bday", "mult.bir", "hosp.care" )]
+elig.cohort2020.strict[ , mult.rec1:=max(mult.rec1), by=c("hosp.birth", "bday", "mult.bir", "hosp.care" )]
+table(elig.cohort2020.strict$mult.bir, elig.cohort2020.strict$mult.rec1, exclude = NULL)
+
+elig.cohort2020.strict[mult.rec>1, tmp.nr := runif(mult.bir)]
+elig.cohort2020.strict[mult.rec>1, tmp.nr2 := max(tmp.nr) , by=c("gestat.compl", "hosp.birth", "bday", "mult.bir", "ethnos.mode", "imd04quint" , "hosp.care" )]
+elig.cohort2020.strict[, mult.exc := ifelse(mult.bir==1 & mult.rec>1 & tmp.nr!=tmp.nr2, 1, 0)]
+table(elig.cohort2020.strict$mult.exc, exclude = NULL)   # replicated ones
+table(elig.cohort2020.strict[mult.bir==1 & mult.rec>1]$mult.exc, exclude = NULL)
+table(elig.cohort2020.strict[mult.bir==1 & mult.rec>1]$mult.exc, elig.cohort2020.strict[mult.bir==1 & mult.rec>1]$pali, exclude = NULL)
+
+mult.tmp <- elig.cohort2020.strict[mult.exc!=0]
+elig.cohort2020.strict <- elig.cohort2020.strict[mult.exc==0]
+table(elig.cohort2020.strict$elig)
+table(elig.cohort2020.strict[pali==1]$elig)
+
+######### remove older than 6 months
+elig.cohort2020.strict <- elig.cohort2020.strict[age.cat!="6-9"]
+elig.cohort2020.strict$age.cat <- factor(elig.cohort2020.strict$age.cat)
+elig.cohort2020.strict$age.cat <- relevel(elig.cohort2020.strict$age.cat, ref="in season")
+
+save(elig.cohort2020.strict, file="XXXX")
+

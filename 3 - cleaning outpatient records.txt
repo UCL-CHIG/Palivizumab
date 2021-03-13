@@ -1,0 +1,80 @@
+#*****************************************************************************#
+#
+#		Project name: palivizumab study			    	#
+#		Author: Ania Zylbersztejn 				#
+# 		R script name: Cleaning HES outpatient records
+#
+#*****************************************************************************#
+
+
+
+#****************************************************************************************************
+#                		       Housekeeping
+#****************************************************************************************************
+
+### set working directory
+setwd('X:\\')
+
+### install / load data.table library 
+library(data.table)
+
+### load HES eligible cohort data 
+load("elig.cohort2020.rdata")
+
+elig.ids <- elig.cohort2020[, c("encrypted_hesid", "bday")]
+
+
+################## FIRST CLEAN HES OPC IN GERENAL ##################
+
+### load a file with OPC data for potentially eligible children
+load(hes.opc)
+hes.opc <- data.table(hes.opc)
+length(unique(hes.opc$encrypted_hesid))
+ 
+hes.opc[, apptdate:= as.Date(hes.opc$apptdate, format = "%Y-%m-%d")]
+ 
+#### remove duplicates
+dups <- duplicated(hes.opc[])
+table(dups)
+hes.opc <- hes.opc[!dups]
+ 
+#### remove unattended appointments
+names(hes.opc)
+table(hes.opc$attended)
+ 
+hes.opc[, attend.sh := ifelse(attended == 5 | attended==6, 1, 0), ]
+table(hes.opc$attended, hes.opc$attend.sh, exclude = NULL)
+hes.opc <- hes.opc[attend.sh==1]
+hes.opc$attended <- NULL
+hes.opc$attend.sh <- NULL
+ 
+dups <- duplicated(hes.opc[,])
+table(dups)
+hes.opc <- hes.opc[!dups]
+ 
+### merge with eligible children
+hes.opc$hes.opc <- 1
+hes.opc.all <- merge(hes.opc, elig.ids, by="encrypted_hesid", all.x=F, all.y=T)
+table(hes.opc.all$hes.opc, exclude = NULL)
+
+
+### keep only those that linked
+hes.opc <- hes.opc.all[!is.na(hes.opc)]
+
+
+### age - we focus on infancy only
+hes.opc[, tmp := as.numeric(apptdate - bday)]
+table(hes.opc$tmp)
+hist(hes.opc$tmp)
+hes.opc <- hes.opc[tmp<365]
+hes.opc <- hes.opc[order(encrypted_hesid, apptdate), ]
+
+### explore duplicates 
+dups <- duplicated(hes.opc[, c("encrypted_hesid", "apptdate", "extract_sitecode", "tretspef")])
+table(dups)
+hes.opc <- hes.opc[!dups]
+
+hes.opc <- hes.opc[apptdate>= as.Date("2010-01-01")]
+
+save(hes.opc, file="XXXX")
+

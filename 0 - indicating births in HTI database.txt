@@ -1,0 +1,417 @@
+#*****************************************************************************#
+#
+#		Project name: palivizumab study			    	#
+#		Author: Ania Zylbersztejn (with R help from Matthew Jay)	#
+# 		Do file name: Indicating birth records in HTI database	
+#
+#*****************************************************************************#
+
+# for this R script, we extracted all records with age at admission <7 days (i.e. startage=7001 or 7002)
+
+#****************************************************************************************************
+#                		       Housekeeping
+#****************************************************************************************************
+
+### set working directory
+setwd('X:\\')
+
+### install / load data.table library 
+library(data.table)
+
+### load data - we extracted all records with age at admission <7 days (i.e. startage=7001 or 7002)
+load("XXXX.rdata") 
+# all.births
+
+
+#****************************************************************************************************
+#                		       Data cleaning
+#****************************************************************************************************
+
+### save as data.table
+all.births <- data.table(all.births)
+
+### drop unfinished episodes 
+nrow(all.births[epistat != 3])
+all.births <- all.births[epistat == 3]
+
+### gen calendar year
+all.births$cal.year <- year(all.births$admidate)     
+list(unique(all.births$cal.year))
+
+
+### generate a short HES ID 
+all.births <- all.births[order(all.births$encrypted_hesid, all.births$admidate, all.births$disdate, all.births$epistart, all.births$epiend)]
+all.births$hesid <- as.numeric(interaction(all.births$encrypted_hesid, drop = T))
+
+
+########################### DATES #######################
+
+### clean admidate
+# check for missing admidate
+all.births[admidate == as.Date("1800-01-01") | admidate == as.Date("1801-01-01")]$admidate <- NA
+anyNA(all.births$admidate)
+length(all.births[is.na(admidate), admidate])    
+anyNA(all.births[is.na(admidate)]$epistart)   # drop ones where both admission date and episode start missing - more complete available
+length(all.births[is.na(epistart), admidate])   
+all.births[is.na(admidate)]$admidate <- all.births[is.na(admidate)]$epistart
+all.births <- all.births[!is.na(epistart) & !is.na(admidate)]
+all.births[admidate == as.Date("1800-01-01") | admidate == as.Date("1801-01-01")]$admidate <- NA
+anyNA(all.births$admidate)
+
+### clean epistart
+anyNA(all.births$epistart)
+
+### clean epiend
+# check for missing epiend
+anyNA(all.births$epiend)
+length(all.births[epiend == "1800-01-01" | epiend == "1801-01-01"]$epiend)  
+all.births[epiend == "1800-01-01" | epiend == "1801-01-01"]$disdate      
+all.births[(epiend == "1800-01-01" | epiend == "1801-01-01") & disdate != "1801-01-01"]$epiend <- 
+  all.births[(epiend == "1800-01-01" | epiend == "1801-01-01") & disdate != "1801-01-01"]$disdate
+ids <- all.births[epiend == "1800-01-01" | epiend == "1801-01-01"]$hesid
+View(all.births[hesid %in% ids, c("hesid", "epistart", "epiend", "admidate", "disdate", "epistat", "diag_01", "opertn_01",
+                          "epiorder"),])
+rm(ids)
+all.births <- all.births[epiend != "1800-01-01" & epiend != "1801-01-01"]  
+length(unique(all.births$encrypted_hesid)) 	
+
+
+### check whether admidate > disdate - dates seem the other way around
+any(all.births[disdate != "1800-01-01" & disdate != "1801-01-01"]$admidate >
+      all.births[disdate != "1800-01-01" & disdate != "1801-01-01"]$disdate)
+View(all.births[(admidate > disdate) & disdate != "1800-01-01" & disdate != "1801-01-01",
+        c("hesid", "admidate", "disdate", "epistart", "epiend")])
+
+# they need to be turned around
+all.births$disdate.tmp <- all.births$disdate
+all.births$admidate.tmp <- all.births$admidate
+all.births$epistart.tmp <- all.births$epistart
+all.births$epiend.tmp <- all.births$epiend
+
+all.births[admidate.tmp > disdate.tmp & disdate.tmp != "1800-01-01" & disdate.tmp != "1801-01-01"]$epiend <-
+  all.births[admidate.tmp > disdate.tmp & disdate.tmp != "1800-01-01" & disdate.tmp != "1801-01-01"]$epistart.tmp
+all.births[admidate.tmp > disdate.tmp & disdate.tmp != "1800-01-01" & disdate.tmp != "1801-01-01"]$epistart <-
+  all.births[admidate.tmp > disdate.tmp & disdate.tmp != "1800-01-01" & disdate.tmp != "1801-01-01"]$epiend.tmp
+all.births[admidate.tmp > disdate.tmp & disdate.tmp != "1800-01-01" & disdate.tmp != "1801-01-01"]$admidate <-
+  all.births[admidate.tmp > disdate.tmp & disdate.tmp != "1800-01-01" & disdate.tmp != "1801-01-01"]$disdate.tmp
+all.births[admidate.tmp > disdate.tmp & disdate.tmp != "1800-01-01" & disdate.tmp != "1801-01-01"]$disdate <-
+  all.births[admidate.tmp > disdate.tmp & disdate.tmp != "1800-01-01" & disdate.tmp != "1801-01-01"]$admidate.tmp
+
+all.births$disdate.tmp <- NULL
+all.births$admidate.tmp <- NULL
+all.births$epistart.tmp <- NULL
+all.births$epiend.tmp <- NULL
+
+
+### create a variable with complete discharge date
+table(is.na(all.births$disdate))
+all.births[is.na(disdate)]$disdate <- as.Date("1800-01-01")
+all.births[, max.disdate := max(disdate), by = list(hesid, admidate)]
+all.births[, max.epiend := max(epiend), by = list(hesid, admidate)]  
+head(all.births, n=2)
+all.births[disdate == as.Date("1800-01-01") | disdate == as.Date("1801-01-01")]$disdate <- NA
+min(all.births$max.disdate)
+nrow(all.births[max.disdate == "1800-01-01" | max.disdate == "1801-01-01"])   
+min(all.births[max.disdate == "1800-01-01" | max.disdate == "1801-01-01"]$epiend) # can use epiend as there are no missing
+min(all.births[max.disdate == "1800-01-01" | max.disdate == "1801-01-01"]$max.epiend) # can use epiend as there are no missing
+all.births[max.disdate == as.Date("1800-01-01") | max.disdate == as.Date("1801-01-01")]$max.disdate <-
+  all.births[max.disdate == as.Date("1800-01-01") | max.disdate == as.Date("1801-01-01")]$max.epiend
+min(all.births$max.disdate)
+
+any(all.births$admidate > all.births$disdate)
+any(all.births$admidate > all.births$max.disdate)
+
+### re-do the calendar year
+all.births$cal.year <-year(all.births$admidate)
+
+
+### drop duplicates
+dups <- duplicated(all.births[, c("encrypted_hesid", "epistart", "epiend", "epiorder", "diag_01", "diag_02",
+                            "diag_03", "diag_04", "diag_05", "diag_06", "diag_07", "diag_08", "diag_09", 
+                            "diag_10", "diag_11", "diag_12", "diag_13", "diag_14", "diag_15", "diag_16", 
+                            "diag_17", "diag_18", "diag_19", "diag_20", "opertn_01", "opertn_02", "opertn_03", "opertn_04", "opertn_05", 
+                            "opertn_06", "opertn_07", "opertn_08", "opertn_09", "opertn_10", 
+                            "opertn_11", "opertn_12", "opertn_13", "opertn_14", "opertn_15", 
+                            "opertn_16", "opertn_17", "opertn_18", "opertn_19", "opertn_20", 
+                            "opertn_21", "opertn_22", "opertn_23", "opertn_24", "admidate", "gestat_1", "birweit_1", "imd04_decile", "ethnos",
+                            "max.disdate", "startage")])
+
+table(dups)
+all.births <- all.births[!dups]
+rm(dups)
+length(unique(all.births$hesid))
+
+
+
+### generate approximate birthday
+all.births[, bday:= min(admidate), by = list(hesid)]
+head(all.births, n=10)
+all.births <- all.births[order(all.births$encrypted_hesid, all.births$admidate, all.births$disdate, all.births$epistart, all.births$epiend)]
+
+
+######################## key risk factors at birth #######################
+
+######### gestational age ############
+summary(all.births$gestat_1)all.births[gestat_1<22 | gestat_1>45]$gestat_1 <- NA
+summary(all.births$gestat_3) 
+all.births <- subset(all.births, select = -c(gestat_2, gestat_3, gestat_4, gestat_5))
+names(all.births)[names(all.births)=="gestat_1"] <- "gestat"
+
+# flag HESIDs with no info at all on gestat
+all.births$tmp[is.na(all.births$gestat)] <- 0
+all.births$tmp[!is.na(all.births$gestat)] <- 1
+all.births[, max.tmp := max(tmp), by = "encrypted_hesid"]
+length(unique(all.births$encrypted_hesid[all.births$max.tmp==0]))
+
+# copy min and max ignoring HESIDs with only missing values
+all.births[max.tmp==1, gestat.min := min(gestat, na.rm=TRUE) , by = "encrypted_hesid"]  
+all.births[max.tmp==1, gestat.max := max(gestat, na.rm=TRUE), by = "encrypted_hesid"] 
+all.births$difflag <- ifelse(all.births$gestat.min - all.births$gestat.max != 0, 1, 0)
+table(all.births$difflag)
+View(all.births[difflag==1])        
+nrow(all.births[is.na(difflag)])    
+
+# add these conflicting to ones the ones that have only missing GA
+table(all.births$max.tmp)
+all.births$max.tmp[all.births$difflag==1] <- 0
+
+# check it worked
+all.births$gestat.min <- NULL
+all.births$gestat.max <- NULL
+all.births[max.tmp==1, gestat.min := min(gestat, na.rm=TRUE) , by = "encrypted_hesid"]  
+all.births[max.tmp==1, gestat.max := max(gestat, na.rm=TRUE), by = "encrypted_hesid"] 
+all.births$difflag <- ifelse(all.births$gestat.min - all.births$gestat.max != 0, 1, 0)
+table(all.births$difflag)
+
+# save one complete version of gestational age
+all.births$gestat.min <- NULL
+all.births$gestat.max <- NULL
+all.births$gestat.compl <- NULL
+all.births[max.tmp==1, gestat.compl := min(gestat, na.rm=TRUE) , by = "encrypted_hesid"]  
+
+
+########### birth weight #########
+
+summary(all.births$birweit_1)
+all.births[birweit_1<200 | birweit_1>7000]$birweit_1 <- NA
+summary(all.births$birweit_2) #all otehrs are missing
+all.births <- subset(all.births, select = -c(birweit_2, birweit_3, birweit_4, birweit_5))
+names(all.births)[names(all.births)=="birweit_1"] <- "birweit"
+
+# flag HESIDs with no info at all on birweit
+all.births$tmp[is.na(all.births$birweit)] <- 0
+all.births$tmp[!is.na(all.births$birweit)] <- 1
+all.births[, max.tmp := max(tmp), by = "encrypted_hesid"]
+length(unique(all.births$encrypted_hesid[all.births$max.tmp==0]))
+
+# copy min and max ignoring HESIDs with only missing values
+all.births[max.tmp==1, birweit.min := min(birweit, na.rm=TRUE) , by = "encrypted_hesid"]  
+all.births[max.tmp==1, birweit.max := max(birweit, na.rm=TRUE), by = "encrypted_hesid"] 
+all.births$difflag <- ifelse(all.births$birweit.min - all.births$birweit.max != 0, 1, 0)
+table(all.births$difflag)
+View(all.births[difflag==1])        
+nrow(all.births[is.na(difflag)])    
+
+# add these conflicting to ones the ones that have only missing GA
+table(all.births$max.tmp)
+all.births$max.tmp[all.births$difflag==1] <- 0
+
+# check it worked
+all.births$birweit.min <- NULL
+all.births$birweit.max <- NULL
+all.births[max.tmp==1, birweit.min := min(birweit, na.rm=TRUE) , by = "encrypted_hesid"]  
+all.births[max.tmp==1, birweit.max := max(birweit, na.rm=TRUE), by = "encrypted_hesid"] 
+all.births$difflag <- ifelse(all.births$birweit.min - all.births$birweit.max != 0, 1, 0)
+
+# save one complete version of birweitional age
+all.births$birweit.min <- NULL
+all.births$birweit.max <- NULL
+all.births$birweit.compl <- NULL
+all.births[max.tmp==1, birweit.compl := min(birweit, na.rm=TRUE) , by = "encrypted_hesid"]  
+
+
+######### remove implausible combinations of birth weight and gestational age #########
+source("Tim Cole's centiles.R")
+table(all.births$implaus, exclude=NULL)
+table(all.births$extract_sitecode, all.births$implaus, exclude=NULL)
+
+all.births[implaus==1]$birweit.compl <- NA
+all.births[implaus==1]$gestat.compl <- NA
+
+
+
+########### sex ############
+table(all.births$sex, exclude=NULL)
+all.births$sex[all.births$sex==9] <- NA
+all.births$sex[all.births$sex==0] <- NA
+all.births$sex <- factor(all.births$sex, labels = c("male", "female"))
+
+all.births[, sex.compl := mean(as.numeric(sex), na.rm=TRUE), by=encrypted_hesid]
+table(all.births$sex.compl, exclude=NULL)
+all.births$sex.compl <- NULL   # all complete
+
+
+########## IMD score ############
+tmp <- all.births[, c("encrypted_hesid", "imd04_decile")]
+levels(tmp$imd04_decile)
+levels(tmp$imd04_decile)[11] <- NA
+tmp <- data.table(tmp)
+tmp <- tmp[!is.na(tmp$imd04_decile)]
+dups <- duplicated(tmp[, c("encrypted_hesid", "imd04_decile")])
+table(dups)
+tmp <- tmp[!dups]
+dups <- duplicated(tmp[, c("encrypted_hesid")])
+table(dups)
+tmp[, imd04.compl := mean(as.numeric(imd04_decile), na.rm=TRUE), by=encrypted_hesid]
+table(tmp$imd04.compl, exclude=NULL)
+tmp <- data.table(tmp)
+tmp[, imd04.compl := ifelse(imd04.compl==as.integer(imd04.compl) , imd04.compl, NA), ]
+table(tmp$imd04.compl, exclude=NULL)   
+
+dups <- duplicated(tmp[, c("encrypted_hesid")])
+tmp <- tmp[!dups]
+rm(dups)
+all.births$imd04_decile <- NULL
+all.births <- merge(all.births, tmp, by="encrypted_hesid", all.x=TRUE)
+rm(tmp)
+
+table(year(all.births$bday))
+
+
+################# most complete IMD score
+tmp <- all.births[,c("encrypted_hesid", "admidate", "epistart", "imd04_decile")]
+levels(tmp$imd04_decile)
+levels(tmp$imd04_decile)[11] <- NA
+table(tmp$imd04_decile, exclude=NULL)
+table(!is.na(tmp$imd04_decile))
+tmp <- data.table(tmp)
+tmp <- tmp[!is.na(tmp$imd04_decile)]
+
+dups <- duplicated(tmp[])
+table(dups)
+tmp <- tmp[!dups]
+
+mode <- function(x){
+  if (is.numeric(x)) {
+    x_table <-table(x)
+    return(as.numeric(names(x_table)[which.max(x_table)]))
+  }
+}
+tmp[, imd04.mode := mode(as.numeric(imd04_decile)), by="encrypted_hesid" ]
+
+tmp<- tmp[order(tmp$encrypted_hesid, tmp$admidate, tmp$epistart)]
+
+tmp[, tmp := seq_len(.N), by = "encrypted_hesid"]
+dups <- duplicated(tmp[, c("encrypted_hesid")])
+table(dups)
+length(tmp[tmp==1]$encrypted_hesid)
+tmp <- tmp[tmp==1]
+
+tmp$imd04_decile <- NULL
+tmp$tmp <- NULL
+tmp$admidate.x <- NULL
+tmp$epistart <- NULL
+tmp$imd04.mode <- as.factor(tmp$imd04.mode)
+levels(tmp$imd04.mode)
+
+all.births <- merge(all.births, tmp, all.x=T, all.y=F, by="encrypted_hesid")
+
+save(all.births, file = "XXX.rdata")
+
+
+
+################## multiple births
+op.col.codes <- c("diag_01", "diag_02", "diag_03", "diag_04", "diag_05", 
+                  "diag_06", "diag_07", "diag_08", "diag_09", "diag_10", 
+                  "diag_11", "diag_12", "diag_13", "diag_14", "diag_15", 
+                  "diag_16", "diag_17", "diag_18", "diag_19", "diag_20" )
+
+# keep a data frame with only relevant non empty diagnoses
+all.births <- data.table(all.births)
+codes <- as.data.frame(all.births[!is.na(diag_01), op.col.codes, with = FALSE])   #
+head(codes, n=10)
+
+all.births$row.num <- seq(1, nrow(all.births), by = 1)
+row.num <- all.births[!is.na(diag_01)]$row.num    # mark rows to be able to link back in
+
+codes.cond <- apply(codes, c(1, 2), function(x) (substr(x, 1, 4) == "Z383" | substr(x,1,4)=="Z384" | substr(x,1,4)=="Z385" | 	
+    substr(x,1,4)=="Z372" | substr(x,1,4)=="Z373" | substr(x,1,4)=="Z374" | substr(x,1,4)=="Z386" | substr(x,1,4)=="Z387" | substr(x,1,4)=="Z388" | 	
+    substr(x,1,4)=="Z375" | substr(x,1,4)=="Z376" | substr(x,1,4)=="Z377")) 	
+
+codes.cond  <- ifelse(is.na(codes.cond ), FALSE, codes.cond )
+head(codes.cond , n=10)
+codes.cond.any <- apply(codes.cond , 1, function(x) any(x) == TRUE)   #1 in apply indicates rows
+codes.cond.any <- ifelse(is.na(codes.cond.any), FALSE, codes.cond.any)
+
+mult.bir <- rep(0, nrow(codes))   # gen vector of 0 of length nrow(codes)
+mult.bir <- ifelse(codes.cond.any, 1, 0)
+mult.bir.df <- data.frame(mult.bir = mult.bir, row.num = row.num)
+all.births <- merge(mult.bir.df, all.births, by = "row.num", all.y = TRUE)
+table(all.births$mult.bir)
+rm(codes.cond, codes.cond.any, mult.bir)
+
+all.births[is.na(all.births$mult.bir)]$mult.bir <- 0
+all.births[ birordr_1>1 & !is.na(birordr_1) , mult.bir:=1]
+
+all.births <- data.table(all.births)
+all.births[ , mult.bir := max(mult.bir), by="encrypted_hesid"]
+
+table(all.births$mult.bir)
+all.births$row.num <- NULL
+
+save(all.births, file = "XXX.rdata")
+
+
+################## stillbirths
+op.col.codes <- c("diag_01", "diag_02", "diag_03", "diag_04", "diag_05", 
+                  "diag_06", "diag_07", "diag_08", "diag_09", "diag_10", 
+                  "diag_11", "diag_12", "diag_13", "diag_14", "diag_15", 
+                  "diag_16", "diag_17", "diag_18", "diag_19", "diag_20" )
+
+# keep a data frame with only relevant non empty diagnoses
+all.births <- data.table(all.births)
+codes <- as.data.frame(all.births[!is.na(diag_01), op.col.codes, with = FALSE])   #
+head(codes, n=10)
+
+all.births$row.num <- seq(1, nrow(all.births), by = 1)
+row.num <- all.births[!is.na(diag_01)]$row.num    # mark rows to be able to link back in
+
+codes.cond <- apply(codes, c(1, 2), function(x) ( substr(x, 1, 4) == "Z371" | substr(x,1,3)=="P95" | substr(x,1,4)=="P964")) 	
+
+codes.cond  <- ifelse(is.na(codes.cond ), FALSE, codes.cond )
+head(codes.cond , n=10)
+codes.cond.any <- apply(codes.cond , 1, function(x) any(x) == TRUE)   #1 in apply indicates rows
+codes.cond.any <- ifelse(is.na(codes.cond.any), FALSE, codes.cond.any)
+
+stillbir <- rep(0, nrow(codes))   
+stillbir <- ifelse(codes.cond.any, 1, 0)
+stillbir.df <- data.frame(stillbir = stillbir, row.num = row.num)
+all.births <- merge(stillbir.df, all.births, by = "row.num", all.y = TRUE)
+table(all.births$stillbir)
+rm(codes.cond, codes.cond.any, stillbir)
+
+all.births[is.na(all.births$stillbir)]$stillbir <- 0
+all.births <- data.table(all.births)
+all.births[ dismeth==5, stillbir:=1]
+
+all.births[ , stillbir := max(stillbir), by="encrypted_hesid"]
+
+table(all.births$stillbir)
+all.births$row.num <- NULL
+
+
+#### drop births in 2017
+(all.births.summaryall.births[ yob!=2017,]
+
+table(all.births.summary$stillbir)
+all.births.summary <- all.births.summary[stillbir!=1]
+all.births.summary$stillbir <- NULL
+
+all.births.summary[, birth.rep.hosp := ifelse(hosp.birth!=99, 1, 0)]
+table(all.births.summary$birth.rep.hosp, exclude = NULL)
+
+table(all.births.summary$yob, exclude = NULL)
+
+names(all.births.summary)
+
+save(all.births.summary, file = "XXX.rdata")

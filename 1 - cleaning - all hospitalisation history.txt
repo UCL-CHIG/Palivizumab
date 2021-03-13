@@ -1,0 +1,453 @@
+#*****************************************************************************#
+#
+#		Project name: palivizumab study			    	#
+#		Author: Ania Zylbersztejn (with help from Matthew Jay)	#
+# 		Do file name: Cleaning of hospital admissions in HES	
+#
+#*****************************************************************************#
+
+# for this R script, we extracted all records with age at admission <3
+# for children with at least one ICD-10 or OPCS code for eligible condition
+# or a linked palivizumab prescription
+
+
+#****************************************************************************************************
+#                		       Housekeeping
+#****************************************************************************************************
+
+### set working directory
+setwd('X:\\')
+
+### install / load data.table library 
+library(data.table)
+
+### load data 
+load("XXXX.rdata") 
+# data name: dat1
+
+
+############## LOAD THE DATA FOR ELIGIBLE CHILDREN
+
+### save as data.table
+dat1 <- data.table(dat1)
+
+### how many patients
+length(unique(dat1$encrypted_hesid)) 
+
+### drop unfinished episodes 
+nrow(dat1[epistat != 3])
+dat1 <- dat1[epistat == 3]
+length(unique(dat1$encrypted_hesid)) 	
+length(dat1$encrypted_hesid)  		
+
+### gen calendar year
+dat1$cal.year <- year(dat1$admidate)     
+table(dat1$cal.year, exclude = NULL)
+
+
+############################ data cleaning ##############################
+
+######## this code was adapted from code developed by Matthew Jay #######
+
+### generate a short HES ID ---------------------------------------------------------------------------------
+dat1 <- dat1[order(dat1$encrypted_hesid, dat1$admidate, dat1$disdate, dat1$epistart, dat1$epiend)]
+dat1$hesid <- as.numeric(interaction(dat1$encrypted_hesid, drop = T))
+
+### clean dates ---------------------------------------------------------------------------------------------
+
+### clean admidate
+# check for missing admidate
+dat1[admidate == as.Date("1800-01-01") | admidate == as.Date("1801-01-01")]$admidate <- NA
+anyNA(dat1$admidate)
+length(dat1[is.na(admidate), admidate])    
+anyNA(dat1[is.na(admidate)]$epistart)   # drop ones where both admission date and episode start missing - more complete available
+length(dat1[is.na(epistart), admidate])   
+dat1[is.na(admidate)]$admidate <- dat1[is.na(admidate)]$epistart
+dat1 <- dat1[!is.na(epistart) & !is.na(admidate)]
+dat1[admidate == as.Date("1800-01-01") | admidate == as.Date("1801-01-01")]$admidate <- NA
+anyNA(dat1$admidate)
+
+### clean epistart
+anyNA(dat1$epistart)
+
+### clean epiend
+# check for missing epiend
+anyNA(dat1$epiend)
+length(dat1[epiend == "1800-01-01" | epiend == "1801-01-01"]$epiend)  
+dat1[epiend == "1800-01-01" | epiend == "1801-01-01"]$disdate     
+dat1[(epiend == "1800-01-01" | epiend == "1801-01-01") & disdate != "1801-01-01"]$epiend <- 
+  dat1[(epiend == "1800-01-01" | epiend == "1801-01-01") & disdate != "1801-01-01"]$disdate
+ids <- dat1[epiend == "1800-01-01" | epiend == "1801-01-01"]$hesid
+# View(dat1[hesid %in% ids, c("hesid", "epistart", "epiend", "admidate", "disdate", "epistat", "diag_01", "opertn_01",
+#                           "epiorder"),])
+rm(ids)
+dat1 <- dat1[epiend != "1800-01-01" & epiend != "1801-01-01"]  
+
+
+### check whether admidate > disdate - dates seem the other way around
+any(dat1[disdate != "1800-01-01" & disdate != "1801-01-01"]$admidate >
+      dat1[disdate != "1800-01-01" & disdate != "1801-01-01"]$disdate)
+
+# they need to be turned around
+dat1$disdate.tmp <- dat1$disdate
+dat1$admidate.tmp <- dat1$admidate
+dat1$epistart.tmp <- dat1$epistart
+dat1$epiend.tmp <- dat1$epiend
+
+dat1[admidate.tmp > disdate.tmp & disdate.tmp != "1800-01-01" & disdate.tmp != "1801-01-01"]$epiend <-
+  dat1[admidate.tmp > disdate.tmp & disdate.tmp != "1800-01-01" & disdate.tmp != "1801-01-01"]$epistart.tmp
+dat1[admidate.tmp > disdate.tmp & disdate.tmp != "1800-01-01" & disdate.tmp != "1801-01-01"]$epistart <-
+  dat1[admidate.tmp > disdate.tmp & disdate.tmp != "1800-01-01" & disdate.tmp != "1801-01-01"]$epiend.tmp
+dat1[admidate.tmp > disdate.tmp & disdate.tmp != "1800-01-01" & disdate.tmp != "1801-01-01"]$admidate <-
+  dat1[admidate.tmp > disdate.tmp & disdate.tmp != "1800-01-01" & disdate.tmp != "1801-01-01"]$disdate.tmp
+dat1[admidate.tmp > disdate.tmp & disdate.tmp != "1800-01-01" & disdate.tmp != "1801-01-01"]$disdate <-
+  dat1[admidate.tmp > disdate.tmp & disdate.tmp != "1800-01-01" & disdate.tmp != "1801-01-01"]$admidate.tmp
+
+dat1$disdate.tmp <- NULL
+dat1$admidate.tmp <- NULL
+dat1$epistart.tmp <- NULL
+dat1$epiend.tmp <- NULL
+
+### check episode start and end dates are sensible (epistar)
+dat1[(epistart > epiend) & epiend != "1800-01-01" & epiend != "1801-01-01"]$epistart <- 
+  dat1[(epistart > epiend) & epiend != "1800-01-01" & epiend != "1801-01-01"]$admidate
+
+dat1[(epistart > epiend) & epiend != "1800-01-01" & epiend != "1801-01-01"]$epiend <- 
+  dat1[(epistart > epiend) & epiend != "1800-01-01" & epiend != "1801-01-01"]$epistart
+
+
+### CREATE VARIABLE WITH COMPLETE DISCHARGE DATES
+table(is.na(dat1$disdate))
+dat1[is.na(disdate)]$disdate <- as.Date("1800-01-01")
+dat1[, max.disdate := max(disdate), by = list(hesid, admidate)]
+dat1[, max.epiend := max(epiend), by = list(hesid, admidate)]  
+head(dat1, n=2)
+dat1[disdate == as.Date("1800-01-01") | disdate == as.Date("1801-01-01")]$disdate <- NA
+min(dat1$max.disdate)
+nrow(dat1[max.disdate == "1800-01-01" | max.disdate == "1801-01-01"])   
+min(dat1[max.disdate == "1800-01-01" | max.disdate == "1801-01-01"]$epiend) 
+min(dat1[max.disdate == "1800-01-01" | max.disdate == "1801-01-01"]$max.epiend) 
+dat1[max.disdate == as.Date("1800-01-01") | max.disdate == as.Date("1801-01-01")]$max.disdate <-
+  dat1[max.disdate == as.Date("1800-01-01") | max.disdate == as.Date("1801-01-01")]$max.epiend
+min(dat1$max.disdate)
+
+any(dat1$admidate > dat1$disdate)
+any(dat1$admidate > dat1$max.disdate)
+
+### re-do the calendar year
+dat1$cal.year <-year(dat1$admidate)
+
+
+################# NUMBER ADMISSIONS AND EPISODES ------------------------------------------
+
+dat1[, epi.n := seq_len(.N), by = rleid(hesid)] # episode number
+dat1[, admi.n := frank(admidate, ties.method = "dense"), by = hesid] # admission number
+
+################ drop duplicates
+dups <- duplicated(dat1[, c("encrypted_hesid", "epistart", "epiend", "epiorder", "diag_01", "diag_02",
+                            "diag_03", "diag_04", "diag_05", "diag_06", "diag_07", "diag_08", "diag_09", 
+                            "diag_10", "diag_11", "diag_12", "diag_13", "diag_14", "diag_15", "diag_16", 
+                            "diag_17", "diag_18", "diag_19", "diag_20", "opertn_01", "opertn_02", "opertn_03", "opertn_04", "opertn_05", 
+                            "opertn_06", "opertn_07", "opertn_08", "opertn_09", "opertn_10", 
+                            "opertn_11", "opertn_12", "opertn_13", "opertn_14", "opertn_15", 
+                            "opertn_16", "opertn_17", "opertn_18", "opertn_19", "opertn_20", 
+                            "opertn_21", "opertn_22", "opertn_23", "opertn_24", "admidate", "max.disdate", "startage", "admimeth",
+                            "extract_sitecode", "sex", "protype")])
+
+table(dups)
+
+dat1 <- dat1[!dups]
+rm(dups)
+length(unique(dat1$hesid))
+
+save(dat1, file = "X:\\data\\complete data march 2018.rdata")
+
+
+# CHECKING CONTINUITY OF DATES --------------------------------------------
+
+# check whether disdate > subsequenet admidate (and treat as same admission if so)
+# data.table::shift 'shifts' the vector up/down by one.
+dat1 <- data.table(dat1)
+dat1 <- dat1[ order(dat1$encrypted_hesid, dat1$admidate, dat1$max.disdate, dat1$epistart, dat1$epiend) ]
+
+dat1$hesid <- NULL
+dat1$hesid <- as.numeric(interaction(dat1$encrypted_hesid, drop = T))
+
+flags <- as.numeric(dat1$max.disdate >= shift(dat1$admidate, type = "lead")-1)
+flags[dat1$hesid != shift(dat1$hesid, type = "lead")] <- 0   # change to 0 if HESIDs dont match 
+flags[dat1$admi.n == shift(dat1$admi.n, type = "lead")] <- 0    # change to 0 if same admission 
+dat1[, dis.flag := flags]
+rm(flags)
+table(dat1$dis.flag)
+
+ids.flagged <- unique(dat1[dis.flag == TRUE]$hesid)    # all unique hesids with a flag
+
+# link together as spells if disdate >= subsequent admidate
+# first work out spell end date
+ids <- dat1$hesid
+
+dat1[, admidate2:= ifelse(admidate >= shift(admidate) & max.disdate <= shift(max.disdate) & encrypted_hesid == shift(encrypted_hesid), shift(admidate), admidate)]
+dat1[, max.disdate2:= ifelse(admidate >= shift(admidate) & max.disdate <= shift(max.disdate) & encrypted_hesid == shift(encrypted_hesid), shift(max.disdate), max.disdate)]
+dat1$admidate2 <- as.Date(dat1$admidate2 , format = "%Y-%m-%d", origin = "1970-01-01")
+dat1[is.na(admidate2), admidate2 := admidate]
+
+dat1$max.disdate2 <- as.Date(dat1$max.disdate2 , format = "%Y-%m-%d", origin = "1970-01-01")
+dat1[is.na(max.disdate2), max.disdate2 := max.disdate]
+
+admidate <- dat1$admidate2
+disdate <- dat1$max.disdate
+max.disdate <- dat1$max.disdate2
+tablen <- max(table(ids, dat1$dis.flag)[, 2]) + 1     # table with rows = max nr of episdoes per patient
+
+index.disdate <- factor(rep(NA, tablen), levels = c(levels(as.factor(disdate)), "1800-01-01"))
+max.spellend <- factor(rep(NA, length(ids)), levels = c(levels(as.factor(disdate)), "1800-01-01"))
+
+# generate vectors with the TRUE/FALSE conditions and keep those as vector[i] in the loop to speed up 
+date.cond <- max.disdate >= shift(admidate, type = "lead") - 1
+ids.cond.1 <- ids %in% ids.flagged
+ids.cond.2 <- ids == shift(ids, type = "lead")
+
+
+pb <- txtProgressBar(min = 1, max = length(ids) - 1, style = 3)
+
+for (i in 1:(length(ids) - 1)) {          # i - row number
+  if (ids.cond.1[i]) {
+    if (ids.cond.2[i]) {
+      index.disdate <- rep(as.Date("1800-01-01"), tablen)
+      if (date.cond[i]) {
+        j <- i
+        k <- i
+        n <- 1
+        while (max.disdate[j] >= (admidate[j + 1] - 1) & ids[j] == ids[j + 1]) {
+          index.disdate[n] <- max.disdate[j]
+          j <- j + 1
+          n <- n + 1
+        }
+        index.disdate[n] <- max.disdate[j]
+        max.spellend[k:(k+n-1)] <- as.factor(max(index.disdate))
+        # for (o in 1:n) {
+        #  max.spellend[k] <- as.factor(max(index.disdate))
+        # k <- k + 1
+        #}
+      }
+    }
+  }
+  setTxtProgressBar(pb, i)
+}
+
+dat1$spell.end <- max.spellend
+
+
+rm(admidate, disdate, i, ids, ids.flagged, index.disdate, j, k,
+   max.disdate, max.spellend, n, pb, tablen)
+
+dat1[is.na(dat1$spell.end), ]$spell.end <- as.factor(dat1[is.na(dat1$spell.end), ]$max.disdate)
+dat1[, dis.flag := NULL]
+
+# now get spellstart
+dat1[, spell.start := min(admidate), by = list(hesid, spell.end)]
+
+# convert to date
+dat1$spell.start <- as.Date(dat1$spell.start, format = "%Y-%m-%d")
+dat1$spell.end <- as.Date(dat1$spell.end, format = "%Y-%m-%d")
+
+any(as.Date(dat1$spell.start) > dat1$spell.end) 
+any(dat1$spell.end < dat1$epiend) 
+
+ids <- dat1[which(dat1$spell.end < dat1$epiend)]$hesid
+View(dat1[hesid %in% ids, c("hesid", "epistart", "epiend", "admidate", "disdate", "spell.start", "spell.end")])
+rm(ids)
+
+# fix spellend
+dat1[which(dat1$spell.end < dat1$epiend)]$spell.end <- dat1[which(dat1$spell.end < dat1$epiend)]$epiend
+dat1[, spell.end := max(spell.end), by = list(hesid, spell.start)]
+
+
+# NUMBER SPELLS -----------------------------------------------------------
+
+dat1[, spell.n := frank(spell.start, ties.method = "dense"), by = hesid]
+dat1[, spell.start.epi := seq_len(.N), by = .(hesid, spell.n)]
+dat1$spell.start.epi <- ifelse(dat1$spell.start.epi > 1, 0, dat1$spell.start.epi)
+
+save(dat1, file = "X:\\data\\complete data march 2018.rdata")
+
+##### drop unnecessary vars
+dat1$birordr_1 <- NULL
+dat1$birordr_2 <- NULL
+dat1$birordr_3 <- NULL
+dat1$birordr_4 <- NULL
+dat1$birordr_5 <- NULL
+dat1$birweit_2 <- NULL
+dat1$birweit_3 <- NULL
+dat1$birweit_4 <- NULL
+dat1$birweit_5 <- NULL
+dat1$gestat_2 <- NULL
+dat1$gestat_3 <- NULL
+dat1$gestat_4 <- NULL
+dat1$gestat_5 <- NULL
+
+save(dat1, file = "XXXX")
+
+
+
+
+###################### further data cleaning ##############################
+
+names(dat1)
+dat1$imd04.birth <- NULL
+dat1$ethnos.mode <- NULL
+dat1$ethnos.cat.mode <- NULL
+dat1$imd04.mode <- NULL
+
+
+################## Creating more complete ethnicity variable
+tmp<- copy(dat1[, c("encrypted_hesid", "ethnos", "admidate" , "epistart")])
+tmp$ethnos <- factor(tmp$ethnos)
+levels(tmp$ethnos)
+table(tmp$ethnos, exclude = NULL)
+tmp <- tmp[ethnos!="99" & ethnos!="Z" & ethnos!="9" & ethnos!="X"]
+tmp <- tmp[!is.na(ethnos)]
+
+tmp$epistart <- NULL
+dups <- duplicated(tmp)
+table(dups)
+tmp <- tmp[!dups]
+
+# need to write own mode function
+mode <- function(x){
+  if (is.numeric(x)) {
+    x_table <-table(x)
+    return(as.numeric(names(x_table)[which.max(x_table)]))
+  }
+}
+
+# run a mode of ethnicity
+tmp$ethnos.mode <- NULL
+tmp[, ethnos.mode := mode(as.numeric(ethnos)), by="encrypted_hesid" ]
+tmp$ethnos <- factor(tmp$ethnos)
+tmp$ethnos.mode <- factor(tmp$ethnos.mode, labels=levels(tmp$ethnos))
+table(tmp$ethnos.mode, exclude = NULL)
+
+tmp <- tmp[, c("ethnos.mode", "encrypted_hesid")]
+dups <- duplicated(tmp)
+table(dups)
+tmp <- tmp[!dups]
+
+dups <- duplicated(tmp[, "encrypted_hesid"])
+table(dups)
+
+
+############ Creating more complete IMD variable
+names(dat1) #imd04_decile
+
+tmp <- copy(dat1[, c("encrypted_hesid", "imd04_decile", "admidate" , "epistart")] ) 
+dups <- duplicated(tmp)
+table(dups)
+tmp <- tmp[!dups]
+
+# drop everything with missing data as we want a mode of complete data
+tmp$imd04_decile <- factor(tmp$imd04_decile)
+levels(tmp$imd04_decile)
+table(tmp$imd04_decile, exclude = NULL)
+tmp <- tmp[!is.na(imd04_decile)]
+
+# run a mode 
+tmp$imd04.mode <- NULL
+tmp[, imd04.mode := mode(as.numeric(imd04_decile)), by="encrypted_hesid" ]
+tmp$imd04_decile <- factor(tmp$imd04_decile)
+tmp$imd04.mode <- factor(tmp$imd04.mode, labels=levels(tmp$imd04_decile))
+
+table(tmp$imd04.mode, exclude = NULL)
+
+tmp <- tmp[, c("imd04.mode", "encrypted_hesid")]
+dups <- duplicated(tmp)
+table(dups)
+tmp <- tmp[!dups]
+
+dups <- duplicated(tmp[, "encrypted_hesid"])
+table(dups)
+
+tmp[, imd04.mode.nr := as.numeric(imd04.mode)]
+table(tmp$imd04.mode, tmp$imd04.mode.nr, exclude = NULL)
+# 1 is least deprived
+
+tmp$imd04quint <- NULL
+tmp$imd04quint <- factor(tmp$imd04quint, levels(tmp$imd04quint)["Q1: least deprived 20%", "Q2", "Q3", "Q4", "Q5: most deprived 20%"])
+
+tmp[imd04.mode.nr ==1 | imd04.mode.nr==2]$imd04quint <- "Q1: least deprived 20%"
+tmp[imd04.mode.nr ==3 | imd04.mode.nr==4]$imd04quint <- "Q2"
+tmp[imd04.mode.nr ==5 | imd04.mode.nr==6]$imd04quint <- "Q3"
+tmp[imd04.mode.nr ==7 | imd04.mode.nr==8]$imd04quint <- "Q4"
+tmp[imd04.mode.nr ==9 | imd04.mode.nr==10]$imd04quint <- "Q5: most deprived 20%"
+table(tmp$imd04quint, exclude = NULL)
+
+names(dat1)
+
+dat1 <- merge(dat1, tmp, all.x=T, all.y=F, by="encrypted_hesid")
+
+table(dat1$imd04.mode, exclude = NULL)
+table(dat1$imd04_decile , exclude = NULL)
+
+names(dat1)
+
+save(dat1, file = "XXXXX.rdata")
+
+
+################# Creating congenital anomalies variable
+### ICD-10 codes from Hardelid code list, 
+### excluding codes included as the eligibility criteria for palivizumab
+
+op.col.codes <- c("diag_01", "diag_02", "diag_03", "diag_04", "diag_05",
+                  "diag_06", "diag_07", "diag_08", "diag_09", "diag_10",
+                  "diag_11", "diag_12", "diag_13", "diag_14", "diag_15",
+                  "diag_16", "diag_17", "diag_18", "diag_19", "diag_20" )
+
+# keep a data frame with only relevant non empty diagnoses
+dat1 <- data.table(dat1)
+
+# look only under 2 years old
+codes <- as.data.frame(dat1[!is.na(diag_01) & (startage>7000 | startage==1), op.col.codes, with = FALSE])   #
+
+dat1$row.num <- seq(1, nrow(dat1), by = 1)
+row.num <- dat1[!is.na(diag_01) & (startage>7000 | startage==1)]$row.num    # mark rows to be able to link back in
+
+ca<-read.csv(file="cong malf other.csv", header=FALSE, stringsAsFactors = F)
+ca3 <- ca[nchar(ca$V1)==3, 1]
+ca4 <- ca[nchar(ca$V1)==4, 1]
+
+codes.cond <- apply(codes, c(1, 2), function(x) substr(x, 1, 3) %in% ca3 | substr(x, 1, 4) %in% ca4 )
+codes.cond  <- ifelse(is.na(codes.cond ), FALSE, codes.cond )
+head(codes.cond , n=10)
+codes.cond.any <- apply(codes.cond , 1, function(x) any(x) == TRUE)   #1 in apply indicates rows
+codes.cond.any <- ifelse(is.na(codes.cond.any), FALSE, codes.cond.any)
+
+cong.anom <- rep(0, nrow(codes))   # gen vector of 0 of length nrow(codes)
+cong.anom <- ifelse(codes.cond.any, 1, 0)
+cong.anom.df <- data.frame(cong.anom = cong.anom, row.num = row.num)
+dat1 <- merge(cong.anom.df, dat1, by = "row.num", all.y = TRUE, all.x=F)
+table(dat1$cong.anom)
+rm(codes.cond, codes.cond.any, cong.anom, cong.anom.df)
+
+dat1 <- data.table(dat1)
+dat1[is.na(cong.anom)]$cong.anom <- 0
+
+dat1$row.num <- NULL
+
+dat1[ , cong.anom := max(cong.anom), by="encrypted_hesid"]
+
+
+####### drop observations before 2008-2017
+dat1 <- dat1[admidate>=as.Date("2008-09-01")]
+dat1 <- dat1[admidate<=as.Date("2017-04-30")]
+
+save(dat1, file = "XXXX")
+
+
+
+
+
+
+
+
+
+

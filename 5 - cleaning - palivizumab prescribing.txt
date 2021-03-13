@@ -1,0 +1,639 @@
+#*****************************************************************************#
+#
+#	Project name: palivizumab study			    	#
+#	Author: Ania Zylbersztejn  				#
+#	R script name: Cleaning palivizumab records from HTI database
+#
+#*****************************************************************************#
+
+### this do-file uses data on palivizumab prescribing from HTI database
+### and from OPC and APC records with procedure code for palivizumab
+
+
+
+#****************************************************************************************************
+#                		       Housekeeping
+#****************************************************************************************************
+
+### set working directory
+setwd('X:\\')
+
+### install / load data.table library 
+library(data.table)
+
+### load palivizumab records
+load("pali.rdata")
+
+
+#****************************************************************************************************
+#                Data cleaning for pali records from HTI database
+#****************************************************************************************************
+
+### pick only date from issue time
+pali$issue_date <- as.Date(pali$datetime_of_issue, format = "%Y-%m-%d")
+
+nrow(pali)
+length(unique(pali$encrypted_hesid))
+
+### gen month year of prescription for tabulations
+pali[, date.tmp := as.Date(paste(year(issue_date), month(issue_date), "1", sep="-") , format = "%Y-%m-%d")]
+
+pali[ , tmp:= ifelse(is.na(encrypted_hesid), 0, 1)]
+
+table(pali$date.tmp, pali$tmp, exclude = NULL )
+
+
+
+#~~~~~~~~~~~~ drop records outside of the time frame of interest
+
+pali <- pali[issue_date>=as.Date("2010-09-01")]
+length(unique(pali$encrypted_hesid))
+
+pali <- pali[issue_date<=as.Date("2017-01-31")]
+length(unique(pali$encrypted_hesid))
+
+#~~~~~~~~~~~~ no linked HES ID
+table(is.na(pali$encrypted_hesid))
+
+pali <- pali[!is.na(encrypted_hesid)]
+
+length(unique(pali$encrypted_hesid))
+
+
+
+#~~~~~~~~~~~~ duplicated records
+
+### look at duplicates (in terms of exact time of issue)
+dups <- duplicated(pali[,c("encrypted_hesid", "datetime_of_issue", "ims_drug_code_fcc")])
+table(dups)
+
+# remove duplicates
+pali <- pali[!dups]
+rm(dups)
+
+### look at duplicates with issue date i.e multiple prescriptions on same day
+# first drop poor matches where a poor match and a good match were on the same day
+dups <- duplicated(pali[,  c("encrypted_hesid", "issue_date", "match_rank")])
+dups2 <- duplicated(pali[,  c("encrypted_hesid", "issue_date")])
+table(dups2, dups)
+pali[, min.match := min(match_rank), by = c("encrypted_hesid", "issue_date")]
+pali$tmp3[dups2] <- 1
+pali$tmp3[!dups2] <- 0
+pali[, tmp4 := max(tmp3), by = c("encrypted_hesid", "issue_date")]
+
+#View(pali[tmp4==1 & min.match!=match_rank])
+length(unique(pali$encrypted_hesid))
+
+#save separately and drop from the cohort
+pali.odd <- pali[tmp4==1 & min.match!=match_rank]
+length(unique(pali.odd$encrypted_hesid))
+pali <- pali[tmp4!=1 | (tmp4==1 & min.match==match_rank)]
+rm(dups, dups2)
+pali$min.match <- NULL
+length(unique(pali.odd$encrypted_hesid))
+
+dups <- duplicated(pali[,  c("encrypted_hesid", "issue_date")])
+table(dups)
+
+# given i used info from multiple dispenses on the same day, now drop duplicates
+dups <- duplicated(pali[,  c("encrypted_hesid", "issue_date")])
+table(dups)
+pali$tmp[dups] <- 1
+pali$tmp[!dups] <- 0
+table(pali$tmp, dups)
+pali[, tmp2:= max(tmp), by =encrypted_hesid]
+table(pali$tmp, pali$tmp2)
+View(pali[tmp2==1])
+pali <- pali[!dups]
+rm(dups)
+pali$tmp <- NULL
+pali$tmp2 <- NULL
+
+# sum those where there is one or two days of a difference between records
+pali <- pali[order(encrypted_hesid, issue_date, match_rank),]
+
+pali$new.issue.date <- NA
+
+pali <- data.table(pali)
+for (i in 1:(nrow(pali)-1)) {
+  if ((pali$issue_date[i+1]-pali$issue_date[i]==1 | pali$issue_date[i+1]-pali$issue_date[i]==2) & 
+      pali$encrypted_hesid[i+1]==pali$encrypted_hesid[i]) {
+    pali$new.issue.date[i+1] <- pali$issue_date[i]
+  }
+  else { pali$new.issue.date[i+1] <- pali$issue_date[i+1]}
+}
+
+pali$new.issue.date <- as.Date(pali$new.issue.date, origin="1970-01-01")
+pali$new.issue.date[1] <- pali$issue_date[1]
+
+
+pali.tmp = copy(pali)      # keep before re-shaping and manipulating
+save(pali.tmp, file = "XXX")
+
+
+#****************************************************************************************************
+#                	Data cleaning from inpatient records
+#****************************************************************************************************
+
+### load clean HES admissions records
+load(dat1)
+
+pali.tmp <- copy(dat1)
+
+pali.tmp[, tmp := ifelse(substr(opertn_01,1,4)=="X865",1,0) + ifelse(substr(opertn_06,1,4)=="X865",1,0) +
+           ifelse(substr(opertn_02,1,4)=="X865",1,0) + ifelse(substr(opertn_07,1,4)=="X865",1,0) +
+           ifelse(substr(opertn_03,1,4)=="X865",1,0) + ifelse(substr(opertn_08,1,4)=="X865",1,0) +
+           ifelse(substr(opertn_04,1,4)=="X865",1,0) + ifelse(substr(opertn_09,1,4)=="X865",1,0) +
+           ifelse(substr(opertn_05,1,4)=="X865",1,0) + ifelse(substr(opertn_10,1,4)=="X865",1,0) ]
+
+# copy over info on all operations
+pali.tmp.apc <- pali.tmp[opertn_01=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_01", "opdate_01")]
+colnames(pali.tmp.apc)[4]<- "opertn"
+colnames(pali.tmp.apc)[5]<- "opdate"
+
+pali.tmp.sh <- pali.tmp[opertn_02=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_02", "opdate_02")]
+names(pali.tmp.sh)
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+pali.tmp.sh <- pali.tmp[opertn_03=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_03", "opdate_03")]
+names(pali.tmp.sh)
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+pali.tmp.sh <- pali.tmp[opertn_04=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_04", "opdate_04")]
+names(pali.tmp.sh)
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+pali.tmp.sh <- pali.tmp[opertn_05=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_05", "opdate_05")]
+names(pali.tmp.sh)
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+
+pali.tmp.sh <- pali.tmp[opertn_06=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_06", "opdate_06")]
+names(pali.tmp.sh)
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+
+pali.tmp.sh <- pali.tmp[opertn_07=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_07", "opdate_07")]
+names(pali.tmp.sh)
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+
+pali.tmp.sh <- pali.tmp[opertn_08=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_08", "opdate_08")]
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+pali.tmp.sh <- pali.tmp[opertn_09=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_09", "opdate_09")]
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+pali.tmp.sh <- pali.tmp[opertn_10=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_10", "opdate_10")]
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+pali.tmp.sh <- pali.tmp[opertn_11=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_11", "opdate_11")]
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+pali.tmp.sh <- pali.tmp[opertn_12=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_12", "opdate_12")]
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+pali.tmp.sh <- pali.tmp[opertn_13=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_13", "opdate_13")]
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+pali.tmp.sh <- pali.tmp[opertn_14=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_14", "opdate_14")]
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+pali.tmp.sh <- pali.tmp[opertn_15=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_15", "opdate_15")]
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+pali.tmp.sh <- pali.tmp[opertn_16=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_16", "opdate_16")]
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+pali.tmp.sh <- pali.tmp[opertn_17=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_17", "opdate_17")]
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+pali.tmp.sh <- pali.tmp[opertn_18=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_18", "opdate_18")]
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+pali.tmp.sh <- pali.tmp[opertn_19=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_19", "opdate_19")]
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+pali.tmp.sh <- pali.tmp[opertn_20=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_20", "opdate_20")]
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+pali.tmp.sh <- pali.tmp[opertn_21=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_21", "opdate_21")]
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+pali.tmp.sh <- pali.tmp[opertn_22=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_22", "opdate_22")]
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+pali.tmp.sh <- pali.tmp[opertn_23=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_23", "opdate_23")]
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+pali.tmp.sh <- pali.tmp[opertn_24=="X865", c("encrypted_hesid", "admidate", "extract_sitecode", "opertn_24", "opdate_24")]
+colnames(pali.tmp.sh)[4]<- "opertn"
+colnames(pali.tmp.sh)[5]<- "opdate"
+pali.tmp.apc <- rbind(pali.tmp.apc, pali.tmp.sh)
+
+names(pali.tmp.apc)
+length(pali.tmp.apc$encrypted_hesid) 
+length(unique(pali.tmp.apc$encrypted_hesid)) 
+
+dups <- duplicated(pali.tmp.apc[, ])
+table(dups)
+pali.tmp.apc <- pali.tmp.apc[!dups]
+
+
+pali.tmp.apc <- pali.tmp.apc[opdate >= as.Date("2010-09-01")]
+length(pali.tmp.apc$encrypted_hesid)
+length(unique(pali.tmp.apc$encrypted_hesid)) 
+
+
+pali.tmp.apc <- pali.tmp.apc[opdate <= as.Date("2017-01-31")]
+length(pali.tmp.apc$encrypted_hesid) 
+
+length(unique(pali.tmp.apc$encrypted_hesid)) 
+
+
+pali.tmp.apc <- pali.tmp.apc[order(encrypted_hesid, opdate),]
+pali.tmp.apc$new.issue.date <- NA
+
+
+pali.tmp.apc <- data.table(pali.tmp.apc)
+for (i in 1:(nrow(pali.tmp.apc)-1)) {
+  if ((pali.tmp.apc$opdate[i+1]-pali.tmp.apc$opdate[i]==1 | pali.tmp.apc$opdate[i+1]-pali.tmp.apc$opdate[i]==2) & 
+      pali.tmp.apc$encrypted_hesid[i+1]==pali.tmp.apc$encrypted_hesid[i]) {
+    pali.tmp.apc$new.issue.date[i+1] <- pali.tmp.apc$opdate[i]
+  }
+  else { pali.tmp.apc$new.issue.date[i+1] <- pali.tmp.apc$opdate[i+1]}
+}
+
+
+pali.tmp.apc$new.issue.date <- as.Date(pali.tmp.apc$new.issue.date, origin="1970-01-01")
+pali.tmp.apc$new.issue.date[1] <- pali.tmp.apc$opdate[1]
+
+names(pali.tmp.apc)
+pali.tmp.apc <- pali.tmp.apc[, c("encrypted_hesid", "new.issue.date", "opdate", "extract_sitecode")]
+
+dups <- duplicated(pali.tmp.apc[,])
+table(dups)
+pali.tmp.apc <- pali.tmp.apc[!dups]
+
+
+pali.tmp.apc[, presc.month := month(new.issue.date)]
+table(pali.tmp.apc$presc.month)
+pali.tmp.apc$presc.month <- NULL
+
+save(pali.tmp.apc , file = "XXXX")
+
+
+
+#****************************************************************************************************
+#                	Data cleaning from outpatient records
+#****************************************************************************************************
+
+### load clean HES OPC records
+### you can use R script (3) to clean these records 
+load(hes.opc)
+
+pali.tmp2 <- copy(hes.opc)
+
+#### remove duplicates
+dups <- duplicated(pali.tmp2[])
+table(dups)
+pali.tmp2 <- pali.tmp2[!dups]
+
+
+#### remove unattended appointments
+pali.tmp2[, attend.sh := ifelse(attended == 5 | attended==6, 1, 0), ]
+table(pali.tmp2$attended, pali.tmp2$attend.sh, exclude = NULL)
+pali.tmp2 <- pali.tmp2[attend.sh==1]
+pali.tmp2$attended <- NULL
+pali.tmp2$attend.sh <- NULL
+
+
+dups <- duplicated(pali.tmp2[,])
+table(dups)
+pali.tmp2 <- pali.tmp2[!dups]
+
+
+names(pali.tmp2)
+
+# only first 4 operations have any info
+pali.tmp2[, pali := ifelse( opertn_01=="X865" | opertn_02=="X865" | opertn_03=="X865" | opertn_04=="X865", 1, 0)]
+table(pali.tmp2$pali, exclude = NULL)
+
+### wrap up the dataset
+pali.tmp.op <- pali.tmp2[, c("encrypted_hesid", "apptdate", "extract_sitecode" )]
+
+names(pali.tmp.op)
+dups <- duplicated(pali.tmp.op[, ])
+table(dups)
+pali.tmp.op <- pali.tmp.op[!dups]
+
+
+pali.tmp.op <- pali.tmp.op[apptdate >= as.Date("2010-09-01")]
+
+pali.tmp.op <- pali.tmp.op[apptdate <= as.Date("2017-01-31")]
+
+pali.tmp.op <- pali.tmp.op[order(encrypted_hesid, apptdate),]
+pali.tmp.op$new.issue.date <- NA
+
+pali.tmp.op <- data.table(pali.tmp.op)
+for (i in 1:(nrow(pali.tmp.op)-1)) {
+  if ((pali.tmp.op$apptdate[i+1]-pali.tmp.op$apptdate[i]==1 | pali.tmp.op$apptdate[i+1]-pali.tmp.op$apptdate[i]==2) & 
+      pali.tmp.op$encrypted_hesid[i+1]==pali.tmp.op$encrypted_hesid[i]) {
+    pali.tmp.op$new.issue.date[i+1] <- pali.tmp.op$apptdate[i]
+  }
+  else { pali.tmp.op$new.issue.date[i+1] <- pali.tmp.op$apptdate[i+1]}
+}
+
+pali.tmp.op$new.issue.date <- as.Date(pali.tmp.op$new.issue.date, origin="1970-01-01")
+pali.tmp.op$new.issue.date[1] <- pali.tmp.op$apptdate[1]
+
+names(pali.tmp.op)
+pali.tmp.op <- pali.tmp.op[, c("encrypted_hesid", "new.issue.date", "apptdate", "extract_sitecode")]
+
+dups <- duplicated(pali.tmp.op[,])
+table(dups)
+pali.tmp.op <- pali.tmp.op[!dups]
+
+
+save(pali.tmp.op , file = "XXXXX")
+
+
+
+
+#****************************************************************************************************
+#                	Combine pali indications from all sources
+#****************************************************************************************************
+
+pali.tmp <- data.table(pali.tmp)
+pali.tmp.apc <- data.table(pali.tmp.apc)
+pali.tmp.op <- data.table(pali.tmp.op)
+
+
+names(pali.tmp.apc)
+pali.tmp.apc$opdate <- NULL
+pali.tmp.apc$apc <- 1
+colnames(pali.tmp.apc)[3] <- "extract_sitecode_apc"
+
+names(pali.tmp.op)
+pali.tmp.op$apptdate <- NULL
+colnames(pali.tmp.op)[3] <- "extract_sitecode_op"
+pali.tmp.op$op <- 1
+
+names(pali.tmp)
+pali.tmp.sh <- pali.tmp[, c("encrypted_hesid", "new.issue.date")]
+pali.tmp.sh$presc <- 1
+
+pali.test <- merge(pali.tmp.sh, pali.tmp.apc, all.x=T, all.y=T, by=c("encrypted_hesid", "new.issue.date"))
+pali.test <- merge(pali.test, pali.tmp.op, all.x=T, all.y=T, by=c("encrypted_hesid", "new.issue.date"))
+
+
+pali.test <- data.table(pali.test)
+names(pali.test)
+colnames(pali.test)[2] <- "issue_date"
+
+pali.test <- pali.test[order(encrypted_hesid, issue_date),]
+
+pali.test$new.issue.date <- NA
+
+for (i in 1:(nrow(pali.test)-1)) {
+  if ((pali.test$issue_date[i+1]-pali.test$issue_date[i]<7 ) & 
+      pali.test$encrypted_hesid[i+1]==pali.test$encrypted_hesid[i]) {
+    pali.test$new.issue.date[i+1] <- pali.test$issue_date[i]
+  }
+  else { pali.test$new.issue.date[i+1] <- pali.test$issue_date[i+1]}
+}
+
+pali.test$new.issue.date <- as.Date(pali.test$new.issue.date, origin="1970-01-01")
+pali.test$new.issue.date[1] <- pali.test$issue_date[1]
+
+
+
+### copy over information from records with the same issue date
+pali.test[ is.na(presc), presc:=0]
+pali.test[, presc := max(presc), by=c("encrypted_hesid", "new.issue.date")]
+
+tmp <- pali.test[, c("encrypted_hesid", "extract_sitecode_apc", "apc", "new.issue.date")]
+tmp <- tmp[!is.na(apc)]
+dups <- duplicated(tmp[,])
+table(dups)
+tmp <- tmp[!dups]
+
+tmp2 <- pali.test[, c("encrypted_hesid", "extract_sitecode_op", "op", "new.issue.date")]
+tmp2 <- tmp2[!is.na(op)]
+dups <- duplicated(tmp2[,])
+table(dups)
+tmp2 <- tmp2[!dups]
+
+pali.test2 <- pali.test[, c("encrypted_hesid", "new.issue.date", "presc")]
+dups <- duplicated(pali.test2[,])
+table(dups)
+pali.test2 <- pali.test2[!dups]
+
+
+pali.test2 <- merge(pali.test2, tmp, all.x=T, all.y=T, by=c("encrypted_hesid", "new.issue.date"))
+pali.test2 <- merge(pali.test2, tmp2, all.x=T, all.y=T, by=c("encrypted_hesid", "new.issue.date"))
+
+save(pali.test2, file="XXXXX")
+
+
+
+#****************************************************************************************************
+#             	   one row per RSV season per child
+#****************************************************************************************************
+
+dups <- duplicated(pali.test2[, c("encrypted_hesid", "new.issue.date")])
+table(dups)
+
+### generate a season variable
+pali.test2$season <- 0
+pali.test2[new.issue.date>as.Date("2010-09-26") & new.issue.date<as.Date("2011-03-04") ]$season <- 2010
+pali.test2[new.issue.date>as.Date("2011-09-26") & new.issue.date<as.Date("2012-03-04") ]$season <- 2011
+pali.test2[new.issue.date>as.Date("2012-09-26") & new.issue.date<as.Date("2013-03-04") ]$season <- 2012
+pali.test2[new.issue.date>as.Date("2013-09-26") & new.issue.date<as.Date("2014-03-04") ]$season <- 2013
+pali.test2[new.issue.date>as.Date("2014-09-26") & new.issue.date<as.Date("2015-03-04") ]$season <- 2014
+pali.test2[new.issue.date>as.Date("2015-09-26") & new.issue.date<as.Date("2016-03-04") ]$season <- 2015
+pali.test2[new.issue.date>as.Date("2016-09-26") & new.issue.date<as.Date("2017-03-04") ]$season <- 2016
+table(pali.test2$season)
+
+
+
+pali.test2$season2 <- 0
+pali.test2[new.issue.date>as.Date("2010-09-01") & new.issue.date<as.Date("2011-04-01") ]$season2 <- 2010
+pali.test2[new.issue.date>as.Date("2011-09-01") & new.issue.date<as.Date("2012-04-01") ]$season2 <- 2011
+pali.test2[new.issue.date>as.Date("2012-09-01") & new.issue.date<as.Date("2013-04-01") ]$season2 <- 2012
+pali.test2[new.issue.date>as.Date("2013-09-01") & new.issue.date<as.Date("2014-04-01") ]$season2 <- 2013
+pali.test2[new.issue.date>as.Date("2014-09-01") & new.issue.date<as.Date("2015-04-01") ]$season2 <- 2014
+pali.test2[new.issue.date>as.Date("2015-09-01") & new.issue.date<as.Date("2016-04-01") ]$season2 <- 2015
+pali.test2[new.issue.date>as.Date("2016-09-01") & new.issue.date<as.Date("2017-04-01") ]$season2 <- 2016
+table(pali.test2$season2)
+# View(pali.test2[season2==0])
+# they are all in april
+
+pali.test2[, season.ind := ifelse(season!=0, 1,
+                                ifelse( season2!=0, 2, 0  ))]
+
+
+pali.test2$season3 <- 0
+pali.test2[new.issue.date>=as.Date("2010-09-01") & new.issue.date<as.Date("2011-09-01") ]$season3 <- 2010
+pali.test2[new.issue.date>=as.Date("2011-09-01") & new.issue.date<as.Date("2012-09-01") ]$season3 <- 2011
+pali.test2[new.issue.date>=as.Date("2012-09-01") & new.issue.date<as.Date("2013-09-01") ]$season3 <- 2012
+pali.test2[new.issue.date>=as.Date("2013-09-01") & new.issue.date<as.Date("2014-09-01") ]$season3 <- 2013
+pali.test2[new.issue.date>=as.Date("2014-09-01") & new.issue.date<as.Date("2015-09-01") ]$season3 <- 2014
+pali.test2[new.issue.date>=as.Date("2015-09-01") & new.issue.date<as.Date("2016-09-01") ]$season3 <- 2015
+pali.test2[new.issue.date>=as.Date("2016-09-01") & new.issue.date<as.Date("2017-09-01") ]$season3 <- 2016
+table(pali.test2$season3)
+
+table(pali.test2$season.ind, exclude = NULL)
+
+
+### generate month of issues
+pali.test2[, month.iss := month(as.Date(new.issue.date))]
+table(pali.test2$month.iss, pali.test2$season.ind, exclude = NULL)
+
+pali.out.season <- pali.test2[month.iss>=5 & month.iss<=8]
+save(pali.out.season, file="data April 2019\\palivizumab\\pali presc not in season.rdata")
+
+pali.test2 <- pali.test2[month.iss<5 | month.iss>8]
+length(unique(pali.test2$encrypted_hesid))
+
+
+######### number of prescriptions per child in season
+pali.test2$tmp <- NULL
+pali.test2[ season.ind==1, tmp := seq_len(.N), by = c("encrypted_hesid", "season3")]
+pali.test2[, tmp := ifelse(is.na(tmp), 0, tmp)]
+pali.test2[, nr.pres.in.seas :=max(tmp), by = c("encrypted_hesid", "season3")]
+
+######### outside of season defined in a narrow way
+pali.test2$tmp <- NULL
+pali.test2[ season.ind!=1, tmp := seq_len(.N), by = c("encrypted_hesid", "season3")]
+pali.test2[, tmp := ifelse(is.na(tmp), 0, tmp)]
+pali.test2[, nr.pres.out.seas :=max(tmp), by = c("encrypted_hesid", "season3")]
+
+######### near season
+pali.test2$tmp <- NULL
+pali.test2[ season.ind==2, tmp := seq_len(.N), by = c("encrypted_hesid", "season3")]
+pali.test2[, tmp := ifelse(is.na(tmp), 0, tmp)]
+pali.test2[, nr.pres.near.seas :=max(tmp), by = c("encrypted_hesid", "season3")]
+
+
+table(pali.test2$nr.pres.in.seas, pali.test2$season, exclude = NULL)
+table(pali.test2$nr.pres.near.seas, pali.test2$season3, exclude = NULL)
+
+
+######### mean duration between prescriptions in season
+pali.test2$tmp <- NULL
+pali.test2[, tmp := min(new.issue.date), by = c("encrypted_hesid", "season")]
+pali.test2[, tmp2 := max(new.issue.date), by = c("encrypted_hesid", "season")]
+pali.test2[, mean.time.between := ifelse(tmp2> tmp, (tmp2-tmp)/(nr.pres.in.seas - 1), 0), by = c("encrypted_hesid", "season")]
+pali.test2[, mean.time.between := as.numeric(as.character(mean.time.between))]
+summary(pali.test2$mean.time.between)
+
+pali.test2[season==0, mean.time.between:=0]
+## add this line to copy one value between all rows
+pali.test2[, mean.time.between := max(mean.time.between), by = c("encrypted_hesid", "season3")]
+summary(pali.test2$mean.time.between)
+
+
+
+######### number of prescriptions overall
+pali.test2$tmp <- NULL
+pali.test2[, tmp := seq_len(.N), by = c("encrypted_hesid", "season3")]
+pali.test2[, nr.pres :=max(tmp), by = c("encrypted_hesid", "season3")]
+
+######### mean duration overall
+pali.test2$tmp <- NULL
+pali.test2[, tmp := min(new.issue.date), by = c("encrypted_hesid", "season3")]
+pali.test2[, tmp2 := max(new.issue.date), by = c("encrypted_hesid", "season3")]
+pali.test2[, mean.time.overall := ifelse(tmp2>tmp,  (tmp2-tmp)/(nr.pres-1), 0), by = c("encrypted_hesid", "season3")]
+summary(pali.test2$mean.time.overall)
+pali.test2[, total.time := (tmp2-tmp), by = c("encrypted_hesid", "season3")]
+pali.test2[, min.issue.date := min(new.issue.date), by = c("encrypted_hesid", "season3")]
+
+######### save one record per child per season
+names(pali.test2)
+pali.test2$season.presc <- pali.test2$season
+pali.test2$season.presc.broad <- pali.test2$season3
+
+
+#### oredr by prescription date 
+pali.test2 <- pali.test2[order(encrypted_hesid, new.issue.date), ]
+pali.test2[, time.since.presc := new.issue.date - shift(new.issue.date, type = "lag"), by=c("encrypted_hesid", "season3")]
+pali.test2[, time.since.presc := ifelse(is.na(time.since.presc), 0, time.since.presc)]
+pali.test2[, tmp := ifelse(time.since.presc <40, 0, 1), ]
+pali.test2[, too.long.break := max(tmp), by=c("encrypted_hesid", "season3") ]
+
+
+pali.summary <- pali.test2[, c( "encrypted_hesid", "nr.pres.near.seas", "season.presc.broad",        
+                          "nr.pres.in.seas" ,"mean.time.between" , "nr.pres", "mean.time.overall", "total.time",
+                          "min.issue.date", "too.long.break"  )]
+
+pali.summary$season <- pali.summary$season.presc.broad
+pali.summary$season.presc.broad <- NULL
+
+dups <- duplicated(pali.summary[, c("encrypted_hesid", "season")])
+table(dups)
+pali.summary <- pali.summary[!dups]
+
+dups <- duplicated(pali.summary[,c("encrypted_hesid", "season")])
+table(dups)
+
+pali.summary[, total.time := as.numeric(total.time)]
+pali.summary[, mean.time.overall := as.numeric(mean.time.overall)]
+pali.summary[, total.time := as.numeric(total.time)]
+
+pali.summary[mean.time.overall==0]$mean.time.overall <- NA
+pali.summary[mean.time.between==0]$mean.time.between <- NA
+
+
+save(pali.summary, file="XXXX")
+
+
+
+
+
+
+

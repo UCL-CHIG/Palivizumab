@@ -1,0 +1,101 @@
+#*****************************************************************************#
+#
+#	Project name: palivizumab study			    	#
+#	Author: Ania Zylbersztejn  				#
+#	R script name: removing implausible values of birth weight and gestational age
+#
+#*****************************************************************************#
+
+# this R script replaces implausible combinations of birth weight (birweit variable in HES) 
+# and gestational age (gestat variable in HES) as missing. These values are indicated if the recorded birth weight 
+# fell outside +/-4 standard deviations (SD) of mean birth weight for each gestational age. To obtain birth weight centiles, 
+# we used LMSgrowth, a Microsoft Excel add-in with growth references for children in the UK, 
+# developed by Pan and Cole (available from: https://www.healthforallchildren.com/shop-base/shop/software/lmsgrowth/) 
+
+
+
+#### Boys
+
+all.births$implaus[all.births$sex==1 & (
+  (all.births$gestat.compl==22 & (all.births$birweit.compl<=266 | all.births$birweit.compl>=745) ) |
+    (all.births$gestat.compl==23 & (all.births$birweit.compl<=309 | all.births$birweit.compl>=899) ) |
+    (all.births$gestat.compl==24 & (all.births$birweit.compl<=352 | all.births$birweit.compl>=1053) ) |
+    (all.births$gestat.compl==25 & (all.births$birweit.compl<=396 | all.births$birweit.compl>=1215) ) |
+    (all.births$gestat.compl==26 & (all.births$birweit.compl<=440 | all.births$birweit.compl>=1388) ) |
+    (all.births$gestat.compl==27 & (all.births$birweit.compl<=486 | all.births$birweit.compl>=1569) ) |
+    (all.births$gestat.compl==28 & (all.births$birweit.compl<=536 | all.births$birweit.compl>=1766) ) |
+    (all.births$gestat.compl==29 & (all.births$birweit.compl<=593 | all.births$birweit.compl>=1980) ) |
+    (all.births$gestat.compl==30 & (all.births$birweit.compl<=659 | all.births$birweit.compl>=2214) ) |
+    (all.births$gestat.compl==31 & (all.births$birweit.compl<=741 | all.births$birweit.compl>=2481) ) |
+    (all.births$gestat.compl==32 & (all.births$birweit.compl<=843 | all.births$birweit.compl>=2780) ) |
+    (all.births$gestat.compl==33 & (all.births$birweit.compl<=968 | all.births$birweit.compl>=3103) ) |
+    (all.births$gestat.compl==34 & (all.births$birweit.compl<=1115 | all.births$birweit.compl>=3435) ) |
+    (all.births$gestat.compl==35 & (all.births$birweit.compl<=1283 | all.births$birweit.compl>=3760) ) |
+    (all.births$gestat.compl==36 & (all.births$birweit.compl<=1470 | all.births$birweit.compl>=4066) ) |
+    (all.births$gestat.compl==37 & (all.births$birweit.compl<=1699 | all.births$birweit.compl>=4193) ) |
+    (all.births$gestat.compl==38 & (all.births$birweit.compl<=1857 | all.births$birweit.compl>=4498) ) |
+    (all.births$gestat.compl==39 & (all.births$birweit.compl<=2014 | all.births$birweit.compl>=4792) ) |
+    (all.births$gestat.compl==40 & (all.births$birweit.compl<=2170 | all.births$birweit.compl>=5078) ) |
+    (all.births$gestat.compl==41 & (all.births$birweit.compl<=2329 | all.births$birweit.compl>=5366) ) |
+    (all.births$gestat.compl==42 & (all.births$birweit.compl<=2492 | all.births$birweit.compl>=5655) ) |
+    (all.births$gestat.compl==43 & (all.births$birweit.compl<=2492 | all.births$birweit.compl>=5655) ) |
+    (all.births$gestat.compl==44 & (all.births$birweit.compl<=2492 | all.births$birweit.compl>=5655) ) |
+    (all.births$gestat.compl==45 & (all.births$birweit.compl<=2492 | all.births$birweit.compl>=5655) ) ) ] <- 1
+
+
+### girls
+all.births$implaus[all.births$sex==2 & (
+  (all.births$gestat.compl==22 & (all.births$birweit.compl<=190 | all.births$birweit.compl>=674) ) |
+    (all.births$gestat.compl==23 & (all.births$birweit.compl<=230 | all.births$birweit.compl>=831) ) |
+    (all.births$gestat.compl==24 & (all.births$birweit.compl<=270 | all.births$birweit.compl>=988) ) |
+    (all.births$gestat.compl==25 & (all.births$birweit.compl<=312 | all.births$birweit.compl>=1153) ) |
+    (all.births$gestat.compl==26 & (all.births$birweit.compl<=354 | all.births$birweit.compl>=1327) ) |
+    (all.births$gestat.compl==27 & (all.births$birweit.compl<=399 | all.births$birweit.compl>=1511) ) |
+    (all.births$gestat.compl==28 & (all.births$birweit.compl<=448 | all.births$birweit.compl>=1705) ) |
+    (all.births$gestat.compl==29 & (all.births$birweit.compl<=506 | all.births$birweit.compl>=1912)  ) |
+    (all.births$gestat.compl==30 & (all.births$birweit.compl<=580 | all.births$birweit.compl>=2145) ) |
+    (all.births$gestat.compl==31 & (all.births$birweit.compl<=672 | all.births$birweit.compl>=2410) ) |
+    (all.births$gestat.compl==32 & (all.births$birweit.compl<=785 | all.births$birweit.compl>=2700) ) |
+    (all.births$gestat.compl==33 & (all.births$birweit.compl<=920 | all.births$birweit.compl>=3007) ) |
+    (all.births$gestat.compl==34 & (all.births$birweit.compl<=1074 | all.births$birweit.compl>=3321) ) |
+    (all.births$gestat.compl==35 & (all.births$birweit.compl<=1247 | all.births$birweit.compl>=3633) ) |
+    (all.births$gestat.compl==36 & (all.births$birweit.compl<=1438 | all.births$birweit.compl>=3929) ) |
+    (all.births$gestat.compl==37 & (all.births$birweit.compl<=1662 | all.births$birweit.compl>=4040) ) |
+    (all.births$gestat.compl==38 & (all.births$birweit.compl<=1820 | all.births$birweit.compl>=4329) ) |
+    (all.births$gestat.compl==39 & (all.births$birweit.compl<=1976 | all.births$birweit.compl>=4605) ) |
+    (all.births$gestat.compl==40 & (all.births$birweit.compl<=2128 | all.births$birweit.compl>=4866) ) |
+    (all.births$gestat.compl==41 & (all.births$birweit.compl<=2280 | all.births$birweit.compl>=5120) ) |
+    (all.births$gestat.compl==42 & (all.births$birweit.compl<=2431 | all.births$birweit.compl>=5370) ) |
+    (all.births$gestat.compl==43 & (all.births$birweit.compl<=2431 | all.births$birweit.compl>=5370) ) |
+    (all.births$gestat.compl==44 & (all.births$birweit.compl<=2431 | all.births$birweit.compl>=5370) ) |
+    (all.births$gestat.compl==45 & (all.births$birweit.compl<=2431 | all.births$birweit.compl>=5370) ) )] <- 1
+
+### sex unknown
+all.births$implaus[is.na(all.births$sex) & (
+  (all.births$gestat.compl==22	&	(all.births$birweit.compl<=266	|	all.births$birweit.compl>=674)	)	|	
+    (all.births$gestat.compl==23	&	(all.births$birweit.compl<=309	|	all.births$birweit.compl>=831)	)	|	
+    (all.births$gestat.compl==24	&	(all.births$birweit.compl<=352	|	all.births$birweit.compl>=988)	)	|	
+    (all.births$gestat.compl==25	&	(all.births$birweit.compl<=396	|	all.births$birweit.compl>=1153)	)	|	
+    (all.births$gestat.compl==26	&	(all.births$birweit.compl<=440	|	all.births$birweit.compl>=1327)	)	|	
+    (all.births$gestat.compl==27	&	(all.births$birweit.compl<=486	|	all.births$birweit.compl>=1511)	)	|	
+    (all.births$gestat.compl==28	&	(all.births$birweit.compl<=536	|	all.births$birweit.compl>=1705)	)	|	
+    (all.births$gestat.compl==29	&	(all.births$birweit.compl<=593	|	all.births$birweit.compl>=1912)	)	|	
+    (all.births$gestat.compl==30	&	(all.births$birweit.compl<=659	|	all.births$birweit.compl>=2145)	)	|	
+    (all.births$gestat.compl==31	&	(all.births$birweit.compl<=741	|	all.births$birweit.compl>=2410)	)	|	
+    (all.births$gestat.compl==32	&	(all.births$birweit.compl<=843	|	all.births$birweit.compl>=2700)	)	|	
+    (all.births$gestat.compl==33	&	(all.births$birweit.compl<=968	|	all.births$birweit.compl>=3007)	)	|	
+    (all.births$gestat.compl==34	&	(all.births$birweit.compl<=1115	|	all.births$birweit.compl>=3321)	)	|	
+    (all.births$gestat.compl==35	&	(all.births$birweit.compl<=1283	|	all.births$birweit.compl>=3633)	)	|	
+    (all.births$gestat.compl==36	&	(all.births$birweit.compl<=1470	|	all.births$birweit.compl>=3929)	)	|	
+    (all.births$gestat.compl==37	&	(all.births$birweit.compl<=1699	|	all.births$birweit.compl>=4040)	)	|	
+    (all.births$gestat.compl==38	&	(all.births$birweit.compl<=1857	|	all.births$birweit.compl>=4329)	)	|	
+    (all.births$gestat.compl==39	&	(all.births$birweit.compl<=2014	|	all.births$birweit.compl>=4605)	)	|	
+    (all.births$gestat.compl==40	&	(all.births$birweit.compl<=2170	|	all.births$birweit.compl>=4866)	)	|	
+    (all.births$gestat.compl==41	&	(all.births$birweit.compl<=2329	|	all.births$birweit.compl>=5120)	)	|	
+    (all.births$gestat.compl==42	&	(all.births$birweit.compl<=2492	|	all.births$birweit.compl>=5370)	)	|	
+    (all.births$gestat.compl==43	&	(all.births$birweit.compl<=2492	|	all.births$birweit.compl>=5370)	)	|	
+    (all.births$gestat.compl==44	&	(all.births$birweit.compl<=2492	|	all.births$birweit.compl>=5370)	)	|	
+    (all.births$gestat.compl==45	&	(all.births$birweit.compl<=2492	|	all.births$birweit.compl>=5370)	)	)]	<-1
+
+
+table(all.births$implaus)

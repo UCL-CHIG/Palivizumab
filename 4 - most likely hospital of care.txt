@@ -1,0 +1,351 @@
+#*****************************************************************************#
+#
+#		Project name: palivizumab study			    	#
+#		Author: Ania Zylbersztejn 				#
+# 		R script name: Deriving most likely hospital of care
+#
+#*****************************************************************************#
+
+### this do-file uses cleaned HES inpatient admissions and outpatient records
+### derived using R scripts (1) and (4)
+
+
+
+#****************************************************************************************************
+#                		       Housekeeping
+#****************************************************************************************************
+
+### set working directory
+setwd('X:\\')
+
+### install / load data.table library 
+library(data.table)
+
+### load HES hospital admission records  
+load("elig.cohort2020.rdata")
+
+
+####### we want to focus on potentially eligible WITH FULL HOSPITAL HISTORY
+elig.ids <- elig.cohort2020[, c("encrypted_hesid", "bday")]
+
+
+#**********************************************************************#
+#******** most likely hospital of care from OPC records ***************#
+#**********************************************************************#
+
+load("hes opc.rdata")
+
+# focus on infancy as most children are only eligible in infancy
+hes.opc <- hes.opc[tmp<365]
+hes.opc <- hes.opc[order(encrypted_hesid, apptdate), ]
+
+### explore duplicates 
+dups <- duplicated(hes.opc[, c("encrypted_hesid", "apptdate", "extract_sitecode", "tretspef")])
+table(dups)
+hes.opc <- hes.opc[!dups]
+
+hes.opc <- hes.opc[apptdate>= as.Date("2010-01-01")]
+
+###### count admissions per hospital
+hes.opc[, tmp := sum(hes.opc), by=c("encrypted_hesid", "extract_sitecode")]
+summary(hes.opc$tmp)
+names(hes.opc)
+hes.opc <- hes.opc[, c("encrypted_hesid", "extract_sitecode", "tmp")]
+dups <- duplicated(hes.opc[,])
+table(dups)
+hes.opc <- hes.opc[!dups]
+
+hes.opc <- hes.opc[order(encrypted_hesid, -tmp), id := seq(.N), by=c("encrypted_hesid")]
+table(hes.opc$id)
+
+## keep two hospitals where they go
+hes.opc <- hes.opc[id<3]
+
+hes.opc <- reshape(hes.opc, timevar="id", idvar=c("encrypted_hesid"), direction = "wide")
+names(hes.opc)
+colnames(hes.opc) <- c("encrypted_hesid", "hosp.opc.1", "nr.opc.appt.1", "hosp.opc.2", "nr.opc.appt.2")
+
+save(hes.opc, file="XXX")
+
+
+
+#**********************************************************************#
+#******** most likely hospital of care from APC records ***************#
+#**********************************************************************#
+
+load("dat1")
+
+### focus on infancy
+dat1 <- dat1[startage>7000]
+
+
+hes.apc <- merge(dat1, elig.ids, all.x=F, all.y=T, by="encrypted_hesid")
+
+### we have correct ages
+hes.apc[, tmp := as.numeric(admidate - bday)]
+summary(hes.apc$tmp)
+hist(hes.apc$tmp)
+
+### keep only relevant information
+hes.apc <- hes.apc[, c("encrypted_hesid", "bday", "epistart", "epiend", "admidate", "admidate2", "max.disdate2" , "max.disdate", "extract_sitecode"), ]
+dups <- duplicated(hes.apc[,])
+table(dups)
+hes.apc <- hes.apc[!dups]
+
+### clean hospital where admission tok place
+hosp.tmp <- copy(hes.apc)
+hosp.tmp[, len.stay := epiend-epistart+1, ]
+hosp.tmp[, sum.len.stay := sum(len.stay), by=c("encrypted_hesid", "extract_sitecode", "admidate2", "max.disdate2")]
+hosp.tmp[, max.len.stay := max(sum.len.stay), by=c("encrypted_hesid", "admidate2", "max.disdate2")]
+hosp.tmp <- hosp.tmp[, c("encrypted_hesid", "extract_sitecode", "admidate2",  "max.disdate2", "sum.len.stay", "max.len.stay")]
+dups <- duplicated(hosp.tmp[])
+table(dups)
+hosp.tmp <- hosp.tmp[!dups]
+hosp.tmp <- hosp.tmp[ sum.len.stay==max.len.stay]
+hosp.tmp <- hosp.tmp[, c("encrypted_hesid", "extract_sitecode", "admidate2", "max.disdate2")]
+dups <- duplicated(hosp.tmp[, c("encrypted_hesid",   "admidate2")])
+table(dups)
+hosp.tmp<- hosp.tmp[!dups]
+
+hes.apc$extract_sitecode <- NULL
+hes.apc <- merge(hes.apc, hosp.tmp, all.x=T, all.y=F, by=c("encrypted_hesid", "admidate2", "max.disdate2"))
+
+hes.apc <- hes.apc[, c("encrypted_hesid", "bday", "admidate2", "max.disdate2" , "extract_sitecode"), ]
+dups <- duplicated(hes.apc[,])
+table(dups)
+hes.apc <- hes.apc[!dups]
+# need to use admidate2 and max.disdate2 --> they were cleaned to account for the overlapping admissions (in error)
+
+names(hes.apc)
+colnames(hes.apc)[3]<- "admidate"
+colnames(hes.apc)[4]<- "max.disdate"
+
+### need to somehow filter out the errors where theres an admission starting on same day and finishing on diff days
+dups <- duplicated(hes.apc[admidate != max.disdate, c("encrypted_hesid", "admidate", "extract_sitecode")])
+table(dups)
+
+# pick the dominant hospital per admission - this should minimise errors
+hes.apc[, len.stay := max.disdate-admidate+1, ]
+hes.apc[len.stay>364, len.stay := 364, ]
+
+hes.apc <- hes.apc[admidate >= as.Date("2010-01-01")]
+
+
+######## save birth admission separately
+hes.birth <- hes.apc[admidate==bday]
+names(hes.birth)
+names(hes.birth)[5] <- "hosp.birth"
+names(hes.birth)[6] <- "birth.adm"
+hes.birth$admidate <- NULL
+hes.birth$max.disdate <- NULL
+save(hes.birth, file="XXXX")
+
+
+### now drop birth admission
+hes.apc <- hes.apc[bday!=admidate]
+
+## summarise time in each hospital per season
+hes.apc[, sum.len.stay := sum(len.stay), by=c("encrypted_hesid",  "extract_sitecode")]
+
+##summarise number of admissions per hospital per season (not includign transfers)
+hes.apc$hes.apc <-1
+hes.apc[, nr.adm := sum(hes.apc), by=c("encrypted_hesid", "extract_sitecode")]
+table(hes.apc$nr.adm)
+
+#### save only key information
+names(hes.apc)
+hes.apc <- hes.apc[, c("encrypted_hesid", "extract_sitecode", "sum.len.stay", "nr.adm")]
+
+#### deduplicate
+dups <- duplicated(hes.apc[,])
+table(dups)
+hes.apc <- hes.apc[!dups]
+
+hes.apc <- hes.apc[order(encrypted_hesid,   -sum.len.stay, -nr.adm), id := seq(.N), by=c("encrypted_hesid")]
+table(hes.apc$id)
+
+## keep two hospitals where they go 
+hes.apc <- hes.apc[id<3]
+
+hes.apc <- reshape(hes.apc, timevar="id", idvar=c("encrypted_hesid"), direction = "wide")
+names(hes.apc)
+colnames(hes.apc) <- c("encrypted_hesid", "hosp.apc.1", "len.stay.1", "nr.apc.adm.1", "hosp.apc.2", "len.stay.2","nr.apc.adm.2")
+
+save(hes.apc, file="XXX")
+
+
+
+#**************************************************************#
+#************************** deaths*****************************#
+#**************************************************************#
+
+dat1 <- dat1[startage>7000]
+
+deaths <- merge(dat1[encrypted_hesid %in% dat1[dismeth==4]$encrypted_hesid, c("encrypted_hesid", "dismeth", "admidate2", "max.disdate2")],
+                elig.ids, all.x=F, all.y=F, by="encrypted_hesid")
+
+dups <- duplicated(deaths)
+table(dups)
+
+deaths <- deaths[!dups]
+
+deaths <- data.table(deaths)
+deaths[ dismeth==4, dod := max.disdate2]
+deaths[ is.na(dod), dod := bday]
+deaths[ , dod2 := max(dod), by="encrypted_hesid"]
+deaths[, adm.after := ifelse( dod2-admidate2 < (-2) , 1, 0)]
+
+# some are definitely wrong
+deaths[, adm.after := max(adm.after), by="encrypted_hesid"]
+deaths <- deaths[adm.after==0]
+
+deaths <- deaths[, c("encrypted_hesid", "dod2", "bday")]
+dups <- duplicated(deaths)
+table(dups)
+deaths <- deaths[!dups]
+
+deaths[, age.death := as.numeric(dod2-bday)]
+hist(deaths$age.death)
+
+deaths$season <- NULL
+deaths[ , season := year(deaths$bday)]
+deaths$tmp <- as.Date(paste(deaths$season, "10", "01", sep="-"), format="%Y-%m-%d")
+
+deaths[, death.month := month(dod2)]
+deaths[, death.before.season := ifelse( dod2 <= tmp, 1, 
+                                        ifelse(dod2-tmp < 152, 2, 0) )]
+# death before season vs death during season
+
+table(deaths$death.before.season)
+table(deaths$death.month, deaths$death.before.season)
+
+dups <- duplicated(deaths[, "encrypted_hesid"])
+table(dups)
+rm(dups)
+names(deaths)
+deaths <- deaths[, -c("bday", "tmp", "death.month", "season")]
+
+save(deaths, file="XXXX")
+
+
+
+#**************************************************************#
+#**************************************************************#
+#*************** derive most likely hosp of care **************#
+#**************************************************************#
+#**************************************************************#
+
+hes.opc$opc <-1
+elig.tmp <- merge(elig.ids, hes.opc, all.x=T, all.y=F, by="encrypted_hesid")
+table(elig.tmp$opc,  exclude = NULL)
+
+# narrow it down to many admissions or long admissions
+hes.apc$apc <-1
+elig.tmp <- merge(elig.tmp, hes.apc, all.x=T, all.y=F, by="encrypted_hesid" )
+table(elig.tmp$apc, exclude = NULL)
+table(elig.tmp$apc, elig.tmp$opc, exclude = NULL)
+
+hes.birth$birth <-1
+hes.birth$bday <- NULL
+
+elig.tmp <- merge(elig.tmp, hes.birth, all.x=T, all.y=F, by="encrypted_hesid")
+table(elig.tmp$birth,  exclude = NULL)
+
+elig.tmp <- merge(elig.tmp, deaths, all.x=T, all.y=F, by="encrypted_hesid")
+table(elig.tmp$death.before.season, exclude = NULL)
+table(elig.tmp$death.before.season, elig.tmp$opc, exclude = NULL)
+table(elig.tmp$death.before.season, elig.tmp$apc, exclude = NULL)
+
+
+
+######### check all saved in the same way
+table(elig.tmp$hosp.opc.1, exclude = NULL)
+elig.tmp[, hosp.opc.1 := as.integer(as.character(hosp.opc.1))]
+elig.tmp[ !is.na(opc) & is.na(hosp.opc.1), hosp.opc.1 := 99]
+table(elig.tmp$hosp.opc.1, exclude = NULL)
+
+table(elig.tmp$hosp.opc.2, exclude = NULL)
+elig.tmp[, hosp.opc.2 := as.integer(as.character(hosp.opc.2))]
+elig.tmp[ !is.na(opc) & is.na(hosp.opc.2) & !is.na(nr.opc.appt.2), hosp.opc.2 := 99]
+table(elig.tmp$hosp.opc.2, exclude = NULL)
+
+table(elig.tmp$hosp.apc.1, exclude = NULL)
+elig.tmp[, hosp.apc.1 := as.integer(as.character(hosp.apc.1))]
+elig.tmp[ !is.na(apc) & is.na(hosp.apc.1), hosp.apc.1 := 99]
+table(elig.tmp$hosp.apc.1, exclude = NULL)
+
+table(elig.tmp$hosp.apc.2, exclude = NULL)
+elig.tmp[, hosp.apc.2 := as.integer(as.character(hosp.apc.2))]
+elig.tmp[ !is.na(apc) & is.na(hosp.apc.2) & !is.na(len.stay.2), hosp.apc.2 := 99]
+
+table(elig.tmp$hosp.birth, exclude = NULL)
+elig.tmp[, hosp.birth := as.integer(as.character(hosp.birth))]
+elig.tmp[ is.na(hosp.birth) , hosp.birth := 99]
+
+
+####### likely hospital of care:
+table(elig.tmp$death.before.season, exclude = NULL)
+
+## agreement between APC and OPC
+table(elig.tmp[hosp.opc.1==hosp.apc.1]$hosp.apc.1, exclude = NULL)
+elig.tmp[hosp.opc.1==hosp.apc.1, hosp.care := hosp.opc.1]
+table(elig.tmp$hosp.care, exclude = NULL)
+table(elig.tmp[!is.na(hosp.care)]$birth, exclude = NULL)    
+table(elig.tmp[hosp.care==hosp.birth]$birth , exclude = NULL)   
+table(elig.tmp[hosp.care!=hosp.birth]$birth , exclude = NULL)    
+
+
+## no OPC records
+table(elig.tmp[is.na(hosp.opc.1) & is.na(hosp.care)]$hosp.apc.1, exclude = NULL)
+elig.tmp[is.na(hosp.opc.1) & hosp.apc.1==hosp.birth & is.na(hosp.care), hosp.care := hosp.apc.1]
+table(elig.tmp$hosp.care, exclude = NULL)
+
+elig.tmp[is.na(hosp.opc.1) & is.na(hosp.care), hosp.care := hosp.apc.1]
+table(elig.tmp$hosp.care, exclude = NULL)
+
+## no APC after birth adn birth hosp agree with OP
+table(elig.tmp[is.na(hosp.apc.1) & is.na(hosp.care)]$hosp.opc.1, exclude = NULL)
+elig.tmp[is.na(hosp.apc.1)  & is.na(hosp.care) & hosp.opc.1==hosp.birth, hosp.care := hosp.opc.1]
+table(elig.tmp$hosp.care, exclude = NULL)
+
+#### if no APC and no OPC but a long birth admission (30+) then assume hosp of birth, otherwise non-reporting
+elig.tmp[, no.rec.after.birth := ifelse(is.na(hosp.apc.1) & is.na(hosp.opc.1), 1, 0)] 
+table(elig.tmp$no.rec.after.birth, exclude = NULL)
+elig.tmp[no.rec.after.birth==1 & is.na(hosp.care) & birth.adm>30, hosp.care:= hosp.birth]
+table(elig.tmp$hosp.care, exclude = NULL)
+elig.tmp[no.rec.after.birth==1 & is.na(hosp.care) , hosp.care:= 99]
+table(elig.tmp$hosp.care, exclude = NULL)
+
+##### if other two / three agree
+elig.tmp[, birth.month:=month(bday)]
+table(elig.tmp[hosp.apc.1==hosp.birth & hosp.apc.1==hosp.opc.2  & is.na(hosp.care) ]$birth.month, exclude = NULL)
+elig.tmp[hosp.apc.1==hosp.birth & hosp.apc.1==hosp.opc.2  & is.na(hosp.care),hosp.care := hosp.opc.2 ]
+
+table(elig.tmp[hosp.apc.2==hosp.birth & hosp.apc.2==hosp.opc.1  & is.na(hosp.care) ]$birth.month, exclude = NULL)
+elig.tmp[hosp.apc.2==hosp.birth & hosp.apc.2==hosp.opc.1  & is.na(hosp.care)  ,hosp.care := hosp.opc.1 ]
+
+table(elig.tmp[hosp.apc.1!=hosp.birth & hosp.opc.2!=hosp.birth & hosp.apc.1==hosp.opc.2 & is.na(hosp.care) ]$birth.month, exclude = NULL)
+elig.tmp[hosp.apc.1!=hosp.birth & hosp.opc.2!=hosp.birth & hosp.apc.1==hosp.opc.2 & is.na(hosp.care) ,hosp.care := hosp.apc.1 ]
+table(elig.tmp$hosp.care, exclude = NULL)
+
+table(elig.tmp[hosp.apc.2!=hosp.birth & hosp.opc.1!=hosp.birth & hosp.apc.2==hosp.opc.1  & is.na(hosp.care) ]$birth.month, exclude = NULL)
+elig.tmp[hosp.apc.2!=hosp.birth & hosp.opc.1!=hosp.birth & hosp.apc.2==hosp.opc.1  & is.na(hosp.care) ,hosp.care := hosp.opc.1 ]
+table(elig.tmp$hosp.care, exclude = NULL)
+
+#### the rest - we dont know so just replace as 99 a it's impossible tod efine
+elig.tmp[is.na(hosp.care), hosp.care := 99]
+table(elig.tmp$hosp.care, exclude = NULL)
+
+names(elig.tmp)
+table(elig.tmp$death.before.season, exclude = NULL)
+table(elig.tmp$no.rec.after.birth, exclude = NULL)
+
+elig.hosp<- elig.tmp[, c("encrypted_hesid", "hosp.care", "dod2", "death.before.season", "age.death", "no.rec.after.birth")]
+
+save(elig.hosp, file="XXXX")
+
+
+
+
+
+

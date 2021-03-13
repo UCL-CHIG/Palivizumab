@@ -1,0 +1,441 @@
+#*****************************************************************************#
+#
+#		Project name: palivizumab study			    	#
+#		Author: Ania Zylbersztejn (with help from Matthew Jay)	#
+# 		R script name: Indicating eligible conditions
+#
+#*****************************************************************************#
+
+# load HES hospital admission records for children 
+# with at least one ICD-10 or OPCS code for eligible condition
+# cleaned in R script (1)
+
+
+
+#****************************************************************************************************
+#                		       Housekeeping
+#****************************************************************************************************
+
+### set working directory
+setwd('X:\\')
+
+### install / load data.table library 
+library(data.table)
+
+### load HES hospital admission records  
+load("dat1.rdata")
+
+
+
+#****************************************************************************************************
+#                         Indicate conditions eligible for palivizumab treatment:
+#****************************************************************************************************
+
+### I adapted code for indicating coditions according to 
+### diagnoses and operations developed by Matthew Jay  
+
+# vector of relevant column names to take
+op.col.codes <- c("diag_01", "diag_02", "diag_03", "diag_04", "diag_05", 
+                  "diag_06", "diag_07", "diag_08", "diag_09", "diag_10", 
+                  "diag_11", "diag_12", "diag_13", "diag_14", "diag_15", 
+                  "diag_16", "diag_17", "diag_18", "diag_19", "diag_20" )
+
+# keep a data frame with only relevant non empty diagnoses
+elig.child <- data.table(dat1)
+codes <- as.data.frame(elig.child[!is.na(diag_01), op.col.codes, with = FALSE])   
+head(codes, n=10)
+
+elig.child$row.num <- seq(1, nrow(elig.child), by = 1)
+row.num <- elig.child[!is.na(diag_01)]$row.num    
+
+op.col.codes2 <- c("opertn_01", "opertn_02", "opertn_03", "opertn_04", "opertn_05", 
+                   "opertn_06", "opertn_07", "opertn_08", "opertn_09", "opertn_10", 
+                   "opertn_11", "opertn_12", "opertn_13", "opertn_14", "opertn_15", 
+                   "opertn_16", "opertn_17", "opertn_18", "opertn_19", "opertn_20", 
+                   "opertn_21", "opertn_22", "opertn_23", "opertn_24")
+
+
+# keep a data frame with only relevant non empty diagnoses
+codes2 <- as.data.frame(elig.child[!is.na(opertn_01), op.col.codes2, with=FALSE ])   
+row.num2 <- elig.child[!is.na(opertn_01)]$row.num    
+
+
+######### 1) bronchopulmonary dysplasia - P27
+codes.cond  <- apply(codes, c(1, 2), function(x) substr(x, 1, 3) == "P27" )   
+codes.cond  <- ifelse(is.na(codes.cond ), FALSE, codes.cond )
+head(codes.cond , n=10)
+codes.cond.any <- apply(codes.cond , 1, function(x) any(x) == TRUE)   
+head(codes.cond.any , n=20)
+length(codes.cond.any[codes.cond.any==FALSE])
+length(codes.cond.any[codes.cond.any==TRUE])
+codes.cond.any <- ifelse(is.na(codes.cond.any), FALSE, codes.cond.any)
+
+bron.dys <- rep(0, nrow(codes))   # gen vector of 0 of length nrow(codes)
+bron.dys <- ifelse(codes.cond.any, 1, 0)     # if had the ICD-10 code =1, else =0
+bron.dys.df <- data.frame(bron.dys = bron.dys, row.num = row.num)
+bron.dys.df <- bron.dys.df[bron.dys==1,]   
+bron.dys.df <- merge(bron.dys.df, elig.child, by = "row.num", all.y = FALSE)
+length(unique(bron.dys.df$encrypted_hesid))
+rm(codes.cond, codes.cond.any)
+save(bron.dys.df, file = "bronch_dys.rdata")
+
+
+######### 2) congenital lung disease
+# diagnoses for congenital diaphragmatic hernia, congenital lung anom, interstitial lung disease
+
+codes.cond <- apply(codes, c(1, 2), function(x) substr(x, 1, 3) == "Q33" | substr(x, 1, 3) == "J80" 
+                    | substr(x, 1, 3) == "J81" | substr(x, 1, 3) == "J82" | substr(x, 1, 3) == "J83" 
+                    | substr(x, 1, 3) == "J84"| substr(x, 1, 4) == "Q790" | substr(x, 1, 4) == "Q791")
+codes.cond  <- ifelse(is.na(codes.cond ), FALSE, codes.cond )
+head(codes.cond , n=10)
+codes.cond.any <- apply(codes.cond , 1, function(x) any(x) == TRUE)   #1 in apply indicates rows
+length(codes.cond.any==TRUE)
+codes.cond.any <- ifelse(is.na(codes.cond.any), FALSE, codes.cond.any)
+
+chron.lung <- rep(0, nrow(codes))   # gen vector of 0 of length nrow(codes)
+chron.lung <- ifelse(codes.cond.any, 1, 0)
+chron.lung.df <- data.frame(chron.lung = chron.lung, row.num = row.num)
+chron.lung.df <- chron.lung.df[chron.lung==1,]   
+chron.lung.df <- merge(chron.lung.df, elig.child, by = "row.num", all.y = FALSE)
+length(unique(chron.lung.df$encrypted_hesid)) 
+rm(codes.cond, codes.cond.any)
+save(chron.lung.df, file = "other_chron_lung.rdata")
+
+
+########## 3) Severe combined immunodeficiency
+codes.cond <- apply(codes, c(1, 2), function(x) substr(x, 1, 3) == "D81" | substr(x, 1, 3) == "D82")
+codes.cond  <- ifelse(is.na(codes.cond ), FALSE, codes.cond )
+head(codes.cond , n=10)
+codes.cond.any <- apply(codes.cond , 1, function(x) any(x) == TRUE)   #1 in apply indicates rows
+length(codes.cond.any==TRUE)
+codes.cond.any <- ifelse(is.na(codes.cond.any), FALSE, codes.cond.any)
+
+immunosup <- rep(0, nrow(codes))   
+immunosup <- ifelse(codes.cond.any, 1, 0)
+immunosup.df <- data.frame(immunosup = immunosup, row.num = row.num)
+immunosup.df <- immunosup.df[immunosup==1,]    
+immunosup.df <- merge(immunosup.df, elig.child, by = "row.num", all.y = FALSE)
+length(unique(immunosup.df$encrypted_hesid)) 
+rm(codes.cond, codes.cond.any)
+save(immunosup.df, file = "immunosup.rdata")
+
+
+########## 4) Ventilation/ oxygen dependency
+row.num2 <- elig.child[!is.na(opertn_01)]$row.num
+codes.cond <- apply(codes2, c(1, 2), function(x) substr(x, 1, 4) == "E871" | substr(x, 1, 4) == "E872" )
+codes.cond  <- ifelse(is.na(codes.cond ), FALSE, codes.cond )
+head(codes.cond , n=10)
+codes.cond.any <- apply(codes.cond , 1, function(x) any(x) == TRUE)   #1 in apply indicates rows
+length(codes.cond.any==TRUE)
+codes.cond.any <- ifelse(is.na(codes.cond.any), FALSE, codes.cond.any)
+
+o2.supp <- rep(0, nrow(codes2))   # gen vector of 0 of length nrow(codes)
+o2.supp <- ifelse(codes.cond.any, 1, 0)
+o2.supp.df <- data.frame(o2.supp = o2.supp, row.num2 = row.num2)
+o2.supp.df <- o2.supp.df[o2.supp==1,]   
+o2.supp.df <- merge(o2.supp.df, elig.child, by.x = "row.num2", by.y="row.num", all.y = FALSE)
+length(unique(o2.supp.df$encrypted_hesid)) 
+rm(codes.cond, codes.cond.any)
+save(o2.supp.df, file = "o2_supp.rdata")
+
+
+########## 5) Congenital heart disease (CHD)
+
+## 5A) CHD based on diagnoses
+codes.cond <- apply(codes, c(1, 2), function(x) substr(x, 1, 3) == "Q20" | substr(x, 1, 3) == "Q21" 
+                    | substr(x, 1, 3) == "Q22" | substr(x, 1, 3) == "Q23" | substr(x, 1, 3) == "Q24" 
+                    | substr(x, 1, 3) == "Q25"| substr(x, 1, 3) == "Q26" )
+codes.cond  <- ifelse(is.na(codes.cond ), FALSE, codes.cond )
+head(codes.cond , n=10)
+codes.cond.any <- apply(codes.cond , 1, function(x) any(x) == TRUE)   
+length(codes.cond.any==TRUE)
+codes.cond.any <- ifelse(is.na(codes.cond.any), FALSE, codes.cond.any)
+
+chd <- rep(0, nrow(codes))   # gen vector of 0 of length nrow(codes)
+chd <- ifelse(codes.cond.any, 1, 0)
+chd.df <- data.frame(chd = chd, row.num = row.num)
+chd.df <- chd.df[chd==1,]    
+chd.df <- merge(chd.df, elig.child, by = "row.num", all.y = FALSE)
+length(unique(chd.df$encrypted_hesid)) 
+rm(codes.cond, codes.cond.any)
+save(chd.df, file = "chd.rdata")
+
+## 5B) CHD based on operations:
+codes.cond <- apply(codes2, c(1, 2), function(x) substr(x, 1, 2) == "K0" | substr(x, 1, 2) == "K1" | substr(x, 1, 2) == "K2" | 
+                      substr(x, 1, 2) == "K3" | substr(x, 1, 2) == "K4" |  substr(x, 1, 2) == "K5" | substr(x, 1, 2) == "K6" | 
+                      substr(x, 1, 2) == "K7" | substr(x, 1, 2) == "K8" | substr(x, 1, 2) == "K9" | substr(x, 1, 2) == "L0" |
+                      substr(x, 1, 2) == "L1" | substr(x, 1, 2) == "L2" | substr(x, 1, 3) == "L65" |substr(x, 1, 3) == "L66" |
+                      substr(x, 1, 3) == "L67" | substr(x, 1, 3) == "L68" | substr(x, 1, 3) == "L69" | substr(x, 1, 2) == "L7" |
+                      substr(x, 1, 3) == "L80" | substr(x, 1, 3) == "L81" | substr(x, 1, 3) == "L82" | substr(x, 1, 3) == "L83" )
+codes.cond  <- ifelse(is.na(codes.cond ), FALSE, codes.cond )
+head(codes.cond , n=10)
+codes.cond.any <- apply(codes.cond , 1, function(x) any(x) == TRUE)   
+length(codes.cond.any==TRUE)
+codes.cond.any <- ifelse(is.na(codes.cond.any), FALSE, codes.cond.any)
+
+chd.op <- rep(0, nrow(codes2))   # gen vector of 0 of length nrow(codes)
+chd.op <- ifelse(codes.cond.any, 1, 0)
+chd.op.df <- data.frame(chd.op = chd.op, row.num2 = row.num2)
+chd.op.df <- chd.op.df[chd.op==1,]    
+chd.op.df <- merge(chd.op.df, elig.child, by.x = "row.num2", by.y="row.num", all.y = FALSE)
+rm(codes.cond, codes.cond.any)
+save(chd.op.df, file = "chd_op.rdata")
+
+
+
+
+#****************************************************************************************************
+#                             Further cleaning
+#****************************************************************************************************
+
+# load a file with information on births from 
+load(all_births_summary.rdata)
+
+
+#*******************************************************
+# Bronchopulmonary dysplasia:
+#*******************************************************
+
+load("bronch_dys.rdata")
+bron.dys.df <- data.table(bron.dys.df)
+
+# keep if they have a diag in infancy - they need to be diagnosed before pali so thats a good proxy
+table(bron.dys.df$startage)
+bron.dys.df <- bron.dys.df[startage>7000 ]
+
+# age at first diagnosis
+bron.dys.df[, bpd.age := min(startage), by="encrypted_hesid"]
+table(bron.dys.df$bpd.age, exclude = NULL)
+
+bron.dys <- bron.dys.df[, c("encrypted_hesid", "bron.dys", "bpd.age")]
+
+dups <- duplicated(bron.dys[,])
+table(dups)
+bron.dys <- bron.dys[!dups]
+
+#### keep only those linked to a birth 
+bron.dys <- merge(bron.dys, all.births.summary[, c("encrypted_hesid", "bday")], all.x=F, all.y=F, by="encrypted_hesid")
+bron.dys[, birth.month:=month(bday)]
+table(bron.dys$birth.month, exclude = NULL)
+table(bron.dys$bpd.age, exclude = NULL)
+rm(bron.dys.df)
+
+
+
+#*******************************************************
+#              other chronic lung disease
+#*******************************************************
+
+########## long term ventilation
+load("o2_supp.rdata")
+
+########## other chronic lung disease:
+load("other_chron_lung.rdata")
+names(chron.lung.df)
+names(o2.supp.df)
+
+chron.lung.df <- data.table(chron.lung.df)
+o2.supp.df <- data.table(o2.supp.df)
+
+# infants only
+chron.lung.sum <- chron.lung.df[startage>7000, c("encrypted_hesid", "admidate2", "max.disdate2", "spell.start", "spell.end", "epistart", "epiend")]
+dups<- duplicated(chron.lung.sum[,])
+table(dups)
+chron.lung.sum <- chron.lung.sum[!dups]
+
+o2.supp.sum <- o2.supp.df[startage>7000, c("encrypted_hesid", "admidate2", "max.disdate2", "spell.start", "spell.end", "epistart", "epiend")]
+dups<- duplicated(o2.supp.sum[,])
+table(dups)
+o2.supp.sum <- o2.supp.sum[!dups]
+
+chron.lung.sum <- rbind(chron.lung.sum, o2.supp.sum)
+
+#### keep only those linked to a birth 
+chron.lung.sum <- merge(chron.lung.sum, all.births.summary[, c("encrypted_hesid", "bday")], all.x=F, all.y=F, by="encrypted_hesid")
+chron.lung.sum[, birth.month:=month(bday)]
+table(chron.lung.sum$birth.month, exclude = NULL)
+
+#### indicate children who had appropriate diagnoses during the RSV season
+chron.lung.sum[, tmp:=as.Date( paste(year(epistart), "10", "01", sep="-"), format="%Y-%m-%d" ) ]
+
+chron.lung.sum[, adm.in.seas := ifelse(month(epistart)==10, 1,    # if episode start in OCtober
+                                       ifelse( epistart <= tmp & epiend >= tmp, 1, 0) )] # or episode started before 01.10 and finished after 01.10
+
+table(chron.lung.sum$adm.in.seas, exclude = NULL)
+chron.lung.sum <- chron.lung.sum[adm.in.seas==1]
+
+chron.lung.sum[, season.cld := year(epistart)]
+
+chron.lung.sum[, age := (tmp-bday), ]
+chron.lung.sum[, age := ifelse(age<0, 0, age), ]
+
+chron.lung.sum <- chron.lung.sum[age<365]
+
+chron.lung.sum <- chron.lung.sum[, -c("spell.start", "spell.end", "admidate2", "max.disdate2", "epistart", "epiend")]
+
+dups <- duplicated(chron.lung.sum[,])
+table(dups)
+chron.lung.sum <- chron.lung.sum[!dups]
+
+rm(chron.lung.df, o2.supp.df)
+rm(o2.supp.sum)
+
+
+
+#***********************************************************************
+#              congenial heart disease - diagnosis under 6 months
+#***********************************************************************
+
+########## CHD - ICD-10 codes
+load("chd.rdata")
+load("chd_op.rdata")
+
+chd.df <- data.table(chd.df)
+chd.op.df <- data.table(chd.op.df)
+
+# keep if they have a diag aged < 6 months
+table(chd.df$startage)
+names(chd.df)
+
+chd.df <- chd.df[startage>7000 , c("encrypted_hesid", "chd", "startage")]
+chd.op.df <- chd.op.df[startage>7000 , c("encrypted_hesid", "chd.op", "startage")]
+dups <- duplicated(chd.df)
+table(dups)
+chd.df <- chd.df[!dups]
+
+dups <- duplicated(chd.op.df)
+table(dups)
+chd.op.df <- chd.op.df[!dups]
+
+
+### combine relevant data
+chd.df$chd.op <- 0
+chd.op.df$chd <- 0
+chd <- rbind(chd.df,  chd.op.df)
+chd[, startage.chd := min(startage), by="encrypted_hesid"]
+chd$startage <- NULL
+dups <- duplicated(chd[,])
+table(dups)
+chd <- chd[!dups]
+
+chd[, chd.diag:= ifelse(chd==1, 1, 0)]
+table(chd$chd.diag, exclude = NULL)
+chd[is.na(chd.diag)]$chd.diag <- 0
+chd[, chd.diag:= max(chd.diag), by="encrypted_hesid"]
+
+chd[, chd.op:= ifelse(chd.op==1, 1, 0)]
+chd[is.na(chd.op)]$chd.op <- 0
+table(chd$chd.op, exclude = NULL)
+chd[, chd.op:= max(chd.op), by="encrypted_hesid"]
+
+chd[, chd:= ifelse(chd.diag==1 | chd.op==1, 1, 0)]
+table(chd$chd, exclude = NULL)
+
+dups <- duplicated(chd[,])
+table(dups)
+chd <- chd[!dups]
+
+# keep only those with a birht record 
+chd <- merge(chd, all.births.summary[, c("encrypted_hesid", "bday")], all.x=F, all.y=F, by="encrypted_hesid")
+chd[, birth.month:=month(bday)]
+table(chd$birth.month, exclude = NULL)
+
+table(chd$startage.chd, exclude = NULL)
+
+rm(chd.df, chd.op.df)
+
+
+
+
+#*******************************************************
+#        SCID - until immunity reconstituted
+#*******************************************************
+
+# SCID data:
+load("immunosup.rdata")
+
+# derive date when immunosup reconstituted
+immun.sum <- immunosup.df[, c("encrypted_hesid", "immunosup", "startage", "extract_sitecode",
+                              "cal.year", "max.disdate", "admi.n", "admidate2", 
+                              "max.disdate2", "spell.end" ,"spell.start", "spell.n", "spell.start.epi"  )]
+immun.sum<- data.table(immun.sum)
+immunosup.df <- data.table(immunosup.df)
+
+# focus on aged <2 years
+immun.sum <- immunosup.df[startage>7000 ,]
+
+dups <- duplicated(immun.sum[])
+table(dups)
+immun.sum <- immun.sum[!dups]
+
+immun.sum[, admi.tmp := seq_len(.N), by=c("encrypted_hesid", "spell.n")]
+immun.sum[, spell.count := max(admi.tmp), by=c("encrypted_hesid")]
+immun.sum[, immun.sup.date := max(spell.end), by=c("encrypted_hesid")]
+immun.sum[, first.adm := min(spell.start), by=c("encrypted_hesid")]
+
+immun.sum <- immun.sum[, c("encrypted_hesid", "immun.sup.date", "spell.count", "first.adm")]
+dups <- duplicated(immun.sum[])
+table(dups)
+immun.sum <- immun.sum[!dups]
+
+
+dups <- duplicated(immun.sum[,  c("encrypted_hesid")])
+table(dups)
+
+##### merge things in - starting with the birth cohort
+immun.sum <- merge( all.births.summary[, c("encrypted_hesid", "bday")], immun.sum, all.x=F, all.y=F, by="encrypted_hesid")
+
+immun.sum <- immun.sum[, c("encrypted_hesid", "first.adm", "immun.sup.date")]
+
+rm(immunosup.df)
+
+
+###########################################################################################################
+#                               combine the data
+###########################################################################################################
+
+names(bron.dys)
+names(chd)
+
+elig.cohort2020 <- merge(bron.dys[, c("encrypted_hesid", "bron.dys", "bpd.age")], chd[, c("encrypted_hesid", "chd", "startage.chd")], all.x=T, all.y=T, by="encrypted_hesid")
+
+names(chron.lung.sum)
+names(chron.lung.sum)[5] <- "cld.adm.in.seas"
+chron.lung.sum <- chron.lung.sum[, c("encrypted_hesid", "season.cld", "cld.adm.in.seas")]
+chron.lung.sum <- data.table(chron.lung.sum)
+chron.lung.sum[order(encrypted_hesid, season.cld), id:= seq(.N), by=c("encrypted_hesid")]
+chron.lung.sum<-reshape(chron.lung.sum, timevar="id", idvar=c("encrypted_hesid"), direction = "wide")
+chron.lung.sum$cld.adm.in.seas.2<- NULL
+names(chron.lung.sum)[3] <- "cld.adm.in.seas"
+elig.cohort2020 <- merge(elig.cohort2020, chron.lung.sum, all.x=T, all.y=T, by="encrypted_hesid")
+
+names(immun.sum)
+elig.cohort2020 <- merge(elig.cohort2020, immun.sum, all.x=T, all.y=T, by="encrypted_hesid")
+
+#### extra cleaning:
+names(elig.cohort2020)
+dups <- duplicated(elig.cohort2020[,])
+table(dups)
+elig.cohort2020 <- elig.cohort2020[!dups]
+
+table(elig.cohort2020$bron.dys)
+elig.cohort2020[is.na(bron.dys)]$bron.dys <-0
+
+table(elig.cohort2020$chd)
+elig.cohort2020[is.na(chd)]$chd <-0
+
+table(elig.cohort2020$cld.adm.in.seas)
+elig.cohort2020[is.na(cld.adm.in.seas)]$cld.adm.in.seas <-0
+
+
+##### link in extra variables
+
+### birth variables
+elig.cohort2020 <- merge(all.births,  elig.cohort2020, all.x=F, all.y=T, by="encrypted_hesid")
+elig.cohort2020[,ydob := year(bday)]
+table(elig.cohort2020$ydob, exclude = NULL)
+
+elig.cohort2020 <- elig.cohort2020[ydob>=2010]
+
+save(elig.cohort2020, file="XXX.rdata")
+
