@@ -1,7 +1,7 @@
 #*****************************************************************************#
 #
-#		Project name: palivizumab study			    	#
-#		Author: Ania Zylbersztejn (with R help from Matthew Jay)	#
+#		Project name: palivizumab study			    	
+#		Author: Ania Zylbersztejn (with R help from Matthew Jay)	
 # 		Do file name: Indicating birth records in HTI database	
 #
 #*****************************************************************************#
