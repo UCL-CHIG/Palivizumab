@@ -84,9 +84,6 @@ pali[, tmp4 := max(tmp3), by = c("encrypted_hesid", "issue_date")]
 #View(pali[tmp4==1 & min.match!=match_rank])
 length(unique(pali$encrypted_hesid))
 
-#save separately and drop from the cohort
-pali.odd <- pali[tmp4==1 & min.match!=match_rank]
-length(unique(pali.odd$encrypted_hesid))
 pali <- pali[tmp4!=1 | (tmp4==1 & min.match==match_rank)]
 rm(dups, dups2)
 pali$min.match <- NULL
